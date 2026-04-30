@@ -1,36 +1,25 @@
-// Anthropic API helper — reads key from env
-const API_URL = 'https://api.anthropic.com/v1/messages';
-const MODEL = 'claude-sonnet-4-20250514';
-
-function getApiKey() {
-  return import.meta.env.VITE_ANTHROPIC_API_KEY || '';
-}
+// Server API helper — Anthropic key stays on the backend.
+const API_URL = '/api/chat';
 
 async function callAPI(system, messages) {
-  const key = getApiKey();
-  if (!key) {
-    console.error('Missing VITE_ANTHROPIC_API_KEY');
-    return null;
-  }
-
   try {
     const r = await fetch(API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': key,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
       },
       body: JSON.stringify({
-        model: MODEL,
         max_tokens: 1024,
         system,
         messages,
       }),
     });
     const d = await r.json();
-    return d.content?.map(c => c.text || '').join('') || null;
+    if (!r.ok) {
+      console.error('API error:', d?.error || r.statusText);
+      return null;
+    }
+    return d.text || null;
   } catch (e) {
     console.error('API error:', e);
     return null;
@@ -142,6 +131,12 @@ export async function getSimFeedback(lang, scenario, parentResponse) {
   return (await callAPI(sys, [{ role: 'user', content: parentResponse }])) || (lang === 'he'
     ? 'ניסיון טוב! נסו לקצר את התגובה בפעם הבאה.'
     : 'Good try! Try keeping it shorter next time.');
+}
+
+// Weekly review / big picture synthesis
+export async function getWeeklyReview(systemPrompt) {
+  const fallback = 'עדיין אין מספיק מידע לסיכום שבועי. ספרו לי עוד על מה שקורה.';
+  return (await callAPI(systemPrompt, [{ role: 'user', content: 'תן לי תמונה כוללת וסיכום' }])) || fallback;
 }
 
 // Simulation intro

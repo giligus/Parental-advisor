@@ -94,3 +94,59 @@ export function detectCommand(msg) {
   if (/עברית|hebrew|תעבור לעברית|switch.*(to|lang).*heb/.test(lower)) return { type: 'lang', value: 'he' };
   return null;
 }
+
+function hasAny(text, words) {
+  const lower = text.toLowerCase();
+  return words.some(word => lower.includes(word.toLowerCase()));
+}
+
+export function detectConversationType(msg) {
+  const text = msg.trim();
+  const compact = text.replace(/[!?.؟,،\s]/g, '');
+
+  if (hasAny(text, ['פגע', 'מכה', 'סכין', 'התאבד', 'לא בטוח', 'מסוכן', 'hurt', 'knife', 'suicide', 'unsafe'])) return 'safety';
+  if (compact.length <= 18 && hasAny(compact, ['שלום', 'היי', 'הי', 'אהלן', 'hi', 'hello'])) return 'greeting';
+  if (hasAny(text, ['סימולציה', 'תרגול', 'תשחק', 'נתרגל', 'practice', 'roleplay'])) return 'simulation';
+  if (hasAny(text, ['סיכום', 'השבוע', 'מה השתנה', 'weekly review'])) return 'weekly_review';
+  if (hasAny(text, ['תמונה כוללת', 'תמונת מצב', 'מה המצב', 'מה אתה רואה', 'big picture', 'status'])) return 'big_picture';
+  if (hasAny(text, ['תוכנית', 'מה לעשות', 'צעדים', 'איך להגיב', 'מה להגיד', 'plan', 'what should'])) return 'action_plan';
+  if (hasAny(text, ['נמאס', 'לא מסוגל', 'שחוקים', 'מיואש', 'מתוסכל', 'קשה לי', 'exhausted', 'hopeless'])) return 'distress';
+  if (hasAny(text, ['היום', 'אתמול', 'קרה', 'פיצוץ', 'צרחות', 'צעק', 'בכי', 'מסך', 'כיבוי', 'מעבר', 'ריב', 'meltdown', 'screaming', 'screen'])) return 'event';
+  return 'open';
+}
+
+export function checkContextSufficiency(msg, conversationType) {
+  if (['greeting', 'open', 'distress'].includes(conversationType)) {
+    return { enoughForEvent: false, enoughForSynthesis: false, missing: 'event_details' };
+  }
+
+  if (['big_picture', 'weekly_review', 'action_plan', 'simulation', 'safety'].includes(conversationType)) {
+    return { enoughForEvent: false, enoughForSynthesis: true, missing: null };
+  }
+
+  const hasTrigger = hasAny(msg, ['מסך', 'כיבוי', 'מעבר', 'טלפון', 'טלוויזיה', 'אייפד', 'screen', 'transition']);
+  const hasReaction = hasAny(msg, ['פיצוץ', 'צרחות', 'צעק', 'בכי', 'סירב', 'השתולל', 'meltdown', 'screaming', 'refused']);
+  const hasParentMove = hasAny(msg, ['אמרתי', 'אמרנו', 'הסבר', 'איימ', 'לקחתי', 'גבול', 'התראה', 'I said', 'we said', 'warning']);
+
+  return {
+    enoughForEvent: hasTrigger && hasReaction && hasParentMove,
+    enoughForSynthesis: hasTrigger && hasReaction && hasParentMove,
+    missing: hasTrigger && hasReaction ? 'parent_response' : 'start_of_escalation',
+  };
+}
+
+export function routeMessage(msg) {
+  const conversationType = detectConversationType(msg);
+  const context = checkContextSufficiency(msg, conversationType);
+
+  if (conversationType === 'safety') return { mode: 'safety', synthesis: true, context };
+  if (conversationType === 'greeting') return { mode: 'greeting', synthesis: false, context };
+  if (conversationType === 'open') return { mode: 'clarifying', synthesis: false, context };
+  if (conversationType === 'distress') return { mode: 'empathic', synthesis: false, context };
+  if (conversationType === 'simulation') return { mode: 'simulation', synthesis: false, context };
+  if (conversationType === 'action_plan') return { mode: 'action_plan', synthesis: false, context };
+  if (conversationType === 'weekly_review') return { mode: 'weekly_review', synthesis: true, context };
+  if (conversationType === 'big_picture') return { mode: 'big_picture', synthesis: true, context };
+  if (conversationType === 'event' && !context.enoughForSynthesis) return { mode: 'event_intake', synthesis: false, context };
+  return { mode: 'analytical', synthesis: true, context };
+}
