@@ -1,6 +1,6 @@
 # Behavioral Advisor Webapp
 
-A chat-first behavioral advisor built with React, Vite, and a small Node/Express production server. The browser never calls Anthropic directly; it talks to `/api/chat`, and the server uses `ANTHROPIC_API_KEY`.
+A chat-first behavioral advisor built with React, Vite, and a small Node/Express production server. The browser never calls Anthropic or OpenAI directly; it talks to `/api/chat`, and the server uses whichever provider is configured in environment variables.
 
 ## What It Includes
 
@@ -39,11 +39,22 @@ Install dependencies:
 npm install
 ```
 
-Create a local `.env` file if you want live AI responses:
+Create a local `.env` file if you want live AI responses.
+
+Anthropic:
 
 ```bash
+LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-your-key-here
 ANTHROPIC_MODEL=claude-sonnet-4-20250514
+```
+
+OpenAI:
+
+```bash
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-your-openai-key-here
+OPENAI_MODEL=gpt-4o-mini
 ```
 
 Run the app:
@@ -54,7 +65,7 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-If `ANTHROPIC_API_KEY` is not set, the UI still runs and falls back to local advisor text.
+If the selected provider key is not set, the UI still runs and falls back to local advisor text.
 
 ## Production Check
 
@@ -67,11 +78,22 @@ npm start
 
 ## Railway Deployment
 
-Set these environment variables in Railway:
+Set one provider configuration in Railway.
+
+Anthropic:
 
 ```bash
+LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-your-key-here
 ANTHROPIC_MODEL=claude-sonnet-4-20250514
+```
+
+OpenAI:
+
+```bash
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-your-openai-key-here
+OPENAI_MODEL=gpt-4o-mini
 ```
 
 Railway should run:
@@ -85,8 +107,8 @@ The included `railway.json` sets the start command to `npm start`.
 
 ## Security Notes
 
-- Do not use `VITE_ANTHROPIC_API_KEY`.
-- Do not call Anthropic from browser code.
+- Do not use `VITE_ANTHROPIC_API_KEY`, `VITE_OPENAI_API_KEY`, or any browser-exposed API key.
+- Do not call Anthropic or OpenAI from browser code.
 - Keep API keys server-side through `server.js` and `/api/chat`.
 - Case memory is stored locally in the browser via `localStorage`; users can export or clear it from the Status screen.
 
@@ -97,4 +119,3 @@ npm run dev      # Vite dev app through server.js middleware
 npm run build    # Production Vite build
 npm start        # Express server for Railway/local production
 ```
-
