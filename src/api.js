@@ -1,9 +1,29 @@
-// Server API helper — Anthropic key stays on the backend.
 const API_URL = '/api/chat';
+let lastApiError = null;
+
+function looksHebrew(text) {
+  return /[\u0590-\u05FF]/.test(text || '');
+}
+
+function friendlyApiFallback(langOrText) {
+  const he = langOrText === 'he' || looksHebrew(langOrText);
+  const quota = /quota|billing|429/i.test(lastApiError || '');
+
+  if (he) {
+    return quota
+      ? 'יש כרגע בעיית מכסה או חיוב במפתח ה-API שמוגדר בשרת, ולכן אני לא מצליח לקבל תשובה מהמנוע. אפשר לבדוק ב-Railway שהמפתח נכון, שיש Billing או קרדיט פעיל אצל הספק, ואז לנסות שוב.'
+      : 'יש כרגע בעיה בחיבור למנוע השפה. אני עדיין כאן, אבל התשובה החכמה מהשרת לא זמינה כרגע. בדקו את משתני הסביבה ב-Railway ואז נסו שוב.';
+  }
+
+  return quota
+    ? 'The server API key is currently hitting a quota or billing limit, so I cannot get a model response. Check the Railway variables and the provider billing or credits, then try again.'
+    : 'There is currently a problem connecting to the language provider. Check the Railway environment variables, then try again.';
+}
 
 async function callAPI(system, messages) {
   try {
-    const r = await fetch(API_URL, {
+    lastApiError = null;
+    const response = await fetch(API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -14,140 +34,157 @@ async function callAPI(system, messages) {
         messages,
       }),
     });
-    const d = await r.json();
-    if (!r.ok) {
-      console.error('API error:', d?.error || r.statusText);
+
+    let data = {};
+    try {
+      data = await response.json();
+    } catch {
+      data = {};
+    }
+
+    if (!response.ok) {
+      lastApiError = data?.error || response.statusText || `HTTP ${response.status}`;
+      console.error('API error:', lastApiError);
       return null;
     }
-    return d.text || null;
-  } catch (e) {
-    console.error('API error:', e);
+
+    return data.text || null;
+  } catch (error) {
+    lastApiError = error?.message || String(error);
+    console.error('API error:', error);
     return null;
   }
 }
 
-// Build system prompt with engine context baked in
-export function buildSystemPrompt(lang, caseData, state, policy, extra) {
+export function buildSystemPrompt(lang, caseData, state, policy, extra = '') {
   const he = lang === 'he';
 
   const base = he
-    ? `אתה יועץ התנהגותי מומחה. אתה מדבר בעברית טבעית, חמה וישירה — כמו יועץ אמיתי.
+    ? `אתה יועץ התנהגותי מתמשך. אתה מדבר בעברית טבעית, רגועה, חמה וישירה, כמו יועץ שמכיר את התיק.
 
-## סגנון
-- חם, ישיר, אמפתי, מעשי. שפה יומיומית.
-- אל תשתמש במונחים קליניים כמו "דפוס", "הסלמה", "ויסות" — דבר בשפה רגילה
-- אל תציג מספרים או אחוזים
-- בלי כותרות, כוכביות, רשימות, bold, markdown — רק טקסט רגיל
-- 2-6 משפטים. פסקאות קצרות.
-- שאלה אחת בסוף או צעד קטן אחד — לא שניהם
-- כשנותנים תסריט: משפט אחד טבעי בגרשיים
-- תגוון את הפתיחות — לא תמיד "אני מבין"
-- כשהמשתמש מספר על הצלחה: תשקף, תחזק, תראה שאתה שמח
+כללי סגנון:
+- קודם אנושי, אחר כך מתודולוגי.
+- אל תחשוף שמות פנימיים כמו State Engine, Analyst Mode או Listener Mode.
+- אל תשתמש בכותרות, markdown, אחוזים או שפה מערכתית.
+- ענה ב-2 עד 6 משפטים קצרים.
+- אם חסר מידע, שאל שאלה קצרה אחת בלבד.
+- אם יש אירוע ברור, חבר אותו בעדינות למה שכבר ידוע.
+- אם המשתמש במצוקה, קודם תקף רגשית ורק אחר כך הצע כיוון.
+- כשאתה מציע ניסוח, תן משפט אחד שאפשר לומר בפועל.`
+    : `You are a continuous behavioral advisor. Speak in natural, calm, warm English, like an advisor who knows the case.
 
-## בניית פרופיל
-כשהמשתמש מספר על אדם חדש (ילד, בן זוג, תלמיד) — שאל שאלות טבעיות כדי להבין:
-- שם, גיל, תפקיד (ילד/הורה/בן זוג)
-- מה מאתגר, מה עובד, מה מפעיל
-- אל תעשה ראיון — תשלב את השאלות בשיחה טבעית
+Style rules:
+- Human first, methodological second.
+- Do not expose internal labels like State Engine, Analyst Mode, or Listener Mode.
+- Do not use headers, markdown, percentages, or system language.
+- Reply in 2 to 6 short sentences.
+- If information is missing, ask one short question only.
+- If there is a clear event, gently connect it to known context.
+- If the user is distressed, validate emotionally before advising.
+- When giving a script, give one practical sentence they can say.`;
 
-## הצעת תרגול
-כשיש מספיק הקשר ונראה שהמשתמש מוכן — הצע תרגול בצורה טבעית:
-"רוצים שנתרגל את הסיטואציה הזו? אני אשחק את [השם] ואתם תענו"
-אל תכפה. תציע רק כשזה מתאים.`
-    : `You are an expert behavioral advisor. Speak natural, warm English.
-
-## Style
-- Warm, direct, empathetic, practical. Everyday language.
-- No clinical terms — speak naturally
-- No numbers or percentages
-- No headers, bullets, bold, markdown — just plain text
-- 2-6 sentences. Short paragraphs.
-- One question at the end OR one small step — not both
-- Vary your openings
-
-## Profile building
-When user mentions a new person — ask natural questions to understand them.
-
-## Practice suggestions
-When context is sufficient — naturally suggest practicing the situation.`;
-
-  const profiles = Object.entries(caseData.profiles);
-  const profileStr = profiles.length > 0
-    ? `\n${he ? 'פרופילים ידועים' : 'Known profiles'}:\n${profiles.map(([, p]) =>
-        `${p.name} (${p.role}${p.age ? `, ${he ? 'בן' : 'age'} ${p.age}` : ''}): ${p.notes || (he ? 'עדיין לא מספיק מידע' : 'limited info')}`
-      ).join('\n')}`
+  const profiles = Object.values(caseData.profiles || {});
+  const profileText = profiles.length
+    ? `\n\n${he ? 'פרופילים ידועים' : 'Known profiles'}:\n${profiles.map(profile => {
+        const age = profile.age ? `, ${he ? 'גיל' : 'age'} ${profile.age}` : '';
+        return `${profile.name} (${profile.role || 'other'}${age}): ${profile.notes || (he ? 'אין עדיין מספיק מידע' : 'limited info')}`;
+      }).join('\n')}`
     : '';
 
-  const engineCtx = caseData.events.length > 0
-    ? `\n[${he ? 'הקשר מנוע — אל תציג, השתמש כרקע' : 'Engine context — background only'}]
-${he ? 'אירועים' : 'Events'}: ${caseData.events.length}, ${he ? 'הסלמות' : 'escalations'}: ${caseData.events.filter(e => e.outcome === 'escalation').length}, ${he ? 'שיפורים' : 'improvements'}: ${caseData.events.filter(e => e.outcome === 'improvement').length}
-${he ? 'מדיניות' : 'Policy'}: ${policy.obj} / ${policy.strat} / ${he ? 'להימנע' : 'avoid'}: ${policy.avoid}`
+  const eventText = (caseData.events || []).length
+    ? `\n\n${he ? 'הקשר תיק פנימי, לא להציג כנתונים טכניים' : 'Internal case context, do not present technically'}:
+${he ? 'אירועים' : 'Events'}: ${caseData.events.length}
+${he ? 'הסלמות' : 'Escalations'}: ${caseData.events.filter(event => event.outcome === 'escalation').length}
+${he ? 'שיפורים' : 'Improvements'}: ${caseData.events.filter(event => event.outcome === 'improvement').length}
+${he ? 'מטרה' : 'Objective'}: ${policy?.obj || ''}
+${he ? 'אסטרטגיה' : 'Strategy'}: ${policy?.strat || ''}
+${he ? 'להימנע' : 'Avoid'}: ${policy?.avoid || ''}`
     : '';
 
-  return base + profileStr + engineCtx + (extra || '');
+  const stateText = state
+    ? `\n\n${he ? 'מצב פנימי משוער' : 'Estimated internal state'}:
+childReg=${state.childReg}, parentReg=${state.parentReg}, conflict=${state.conflict}, trust=${state.trust}, risk=${state.risk}`
+    : '';
+
+  return `${base}${profileText}${eventText}${stateText}${extra || ''}`;
 }
 
-// Greeting
 export async function getGreeting(lang) {
-  const sys = lang === 'he'
-    ? 'אתה יועץ התנהגותי. פתח בברכה חמה בעברית. 2-3 משפטים. שאל מה מעסיק. לא מערכת, לא AI. בשפה חמה ובוגרת.'
-    : 'You are a behavioral advisor. Open with a warm greeting. 2-3 sentences. Ask what\'s on their mind.';
-  const fallback = lang === 'he' ? 'שלום, שמח שאתם פה. ספרו לי — מה מעסיק אתכם?' : 'Hi! Glad you\'re here. What\'s on your mind?';
-  return (await callAPI(sys, [{ role: 'user', content: lang === 'he' ? 'שלום' : 'Hello' }])) || fallback;
+  const he = lang === 'he';
+  const system = he
+    ? 'אתה יועץ התנהגותי. פתח בברכה חמה בעברית טבעית. 2-3 משפטים. שאל בעדינות מה מעסיק אותם.'
+    : "You are a behavioral advisor. Open with a warm greeting. 2-3 sentences. Gently ask what's on their mind.";
+  const fallback = he
+    ? 'שלום, שמח שאתם פה. תרצו לספר מה קרה היום, או להמשיך מהנושא האחרון?'
+    : "Hi, glad you're here. Would you like to tell me what happened today, or continue from the last topic?";
+
+  return (await callAPI(system, [{ role: 'user', content: he ? 'שלום' : 'Hello' }])) || fallback;
 }
 
-// Main advisor response
 export async function getAdvisorResponse(systemPrompt, conversationHistory) {
-  const fallback = 'ספרו לי עוד.';
-  return (await callAPI(systemPrompt, conversationHistory)) || fallback;
+  const response = await callAPI(systemPrompt, conversationHistory);
+  if (response) return response;
+  return lastApiError ? friendlyApiFallback(systemPrompt) : 'ספרו לי עוד.';
 }
 
-// Profile extraction from conversation
 export async function extractProfiles(recentMessages) {
-  const sys = `Analyze this conversation and extract any person profiles mentioned. Return ONLY valid JSON, no other text. Format:
-{"profiles": [{"name": "string", "role": "child|parent|partner|student|other", "age": null, "challenges": [], "strengths": [], "triggers": [], "whatWorks": [], "notes": ""}]}
-If no profile info found, return {"profiles": []}. Only include profiles with at least a name.`;
+  const system = `Analyze this conversation and extract person profiles. Return ONLY valid JSON, no markdown.
+Format: {"profiles":[{"name":"string","role":"child|parent|partner|student|other","age":null,"challenges":[],"strengths":[],"triggers":[],"whatWorks":[],"notes":""}]}
+If no profile info is found, return {"profiles":[]}. Only include profiles with at least a name.`;
 
-  const content = recentMessages.map(x => `${x.role}: ${x.text}`).join('\n');
-  const raw = await callAPI(sys, [{ role: 'user', content }]);
+  const content = recentMessages.map(item => `${item.role}: ${item.text}`).join('\n');
+  const raw = await callAPI(system, [{ role: 'user', content }]);
 
   if (!raw) return [];
 
   try {
-    const clean = raw.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(clean);
+    const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
     return parsed.profiles || [];
   } catch {
     return [];
   }
 }
 
-// Simulation feedback
 export async function getSimFeedback(lang, scenario, parentResponse) {
-  const sys = lang === 'he'
-    ? `אתה יועץ הורי בסימולציה. הסיטואציה: ${scenario.context}\nהילד אמר: "${scenario.child}"\nההורה ענה: "${parentResponse}"\nתן משוב חם וישיר. מה טוב, מה לשפר, דוגמה קצרה. 3-5 משפטים. עברית טבעית. ללא כותרות או markdown.`
-    : `You're a parenting advisor in a simulation. Situation: ${scenario.context}\nChild said: "${scenario.child}"\nParent responded: "${parentResponse}"\nGive warm, direct feedback. What's good, what to improve, short example. 3-5 sentences. No headers or markdown.`;
+  const he = lang === 'he';
+  const system = he
+    ? `אתה יועץ הורי בסימולציה. הסיטואציה: ${scenario.context}
+הילד אמר: "${scenario.child}"
+ההורה ענה: "${parentResponse}"
+תן משוב חם וישיר: מה טוב, מה לשפר, ודוגמה קצרה. 3-5 משפטים. בלי כותרות או markdown.`
+    : `You are a parenting advisor in a simulation. Situation: ${scenario.context}
+Child said: "${scenario.child}"
+Parent responded: "${parentResponse}"
+Give warm, direct feedback: what is good, what to improve, and one short example. 3-5 sentences. No headers or markdown.`;
 
-  return (await callAPI(sys, [{ role: 'user', content: parentResponse }])) || (lang === 'he'
-    ? 'ניסיון טוב! נסו לקצר את התגובה בפעם הבאה.'
-    : 'Good try! Try keeping it shorter next time.');
+  const response = await callAPI(system, [{ role: 'user', content: parentResponse }]);
+  if (response) return response;
+  if (lastApiError) return friendlyApiFallback(lang);
+
+  return he
+    ? 'ניסיון טוב. בפעם הבאה נסו לקצר את התגובה ולשמור על משפט גבול אחד ברור.'
+    : 'Good try. Next time, keep it shorter and use one clear boundary sentence.';
 }
 
-// Weekly review / big picture synthesis
 export async function getWeeklyReview(systemPrompt) {
-  const fallback = 'עדיין אין מספיק מידע לסיכום שבועי. ספרו לי עוד על מה שקורה.';
-  return (await callAPI(systemPrompt, [{ role: 'user', content: 'תן לי תמונה כוללת וסיכום' }])) || fallback;
+  const response = await callAPI(systemPrompt, [{ role: 'user', content: 'Give me the big picture and weekly review.' }]);
+  if (response) return response;
+  return lastApiError
+    ? friendlyApiFallback(systemPrompt)
+    : 'עדיין אין מספיק מידע לסיכום שבועי. ספרו לי עוד על מה שקורה.';
 }
 
-// Simulation intro
 export async function getSimIntro(lang, scenario) {
-  const sys = lang === 'he'
-    ? `אתה יועץ הורי שמתחיל סימולציה. הצג את המצב בטבעיות, "שחק" את הילד, ובקש מההורה להגיב. 3 משפטים. עברית טבעית.`
-    : `You're starting a parenting simulation. Present the situation naturally, "play" the child, ask the parent to respond. 3 sentences.`;
+  const he = lang === 'he';
+  const system = he
+    ? `אתה יועץ הורי שמתחיל סימולציה. הצג את המצב בטבעיות, שחק את הילד, ובקש מההורה להגיב. 3 משפטים.`
+    : 'You are starting a parenting simulation. Present the situation naturally, play the child, and ask the parent to respond. 3 sentences.';
 
-  const fallback = lang === 'he'
+  const fallback = he
     ? `בואו נתרגל. ${scenario.context}\n\nהילד אומר: "${scenario.child}"\n\nמה אתם עונים?`
     : `Let's practice. ${scenario.context}\n\nThe child says: "${scenario.child}"\n\nWhat do you say?`;
 
-  return (await callAPI(sys, [{ role: 'user', content: `${scenario.context}\n"${scenario.child}"` }])) || fallback;
+  const response = await callAPI(system, [{ role: 'user', content: `${scenario.context}\n"${scenario.child}"` }]);
+  if (response) return response;
+  return lastApiError ? friendlyApiFallback(lang) : fallback;
 }

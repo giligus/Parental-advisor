@@ -15,6 +15,15 @@ const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'develo
 
 app.use(express.json({ limit: '1mb' }));
 
+app.get('/api/health', (_req, res) => {
+  res.json({
+    ok: true,
+    provider,
+    keyConfigured: provider === 'openai' ? Boolean(process.env.OPENAI_API_KEY) : Boolean(process.env.ANTHROPIC_API_KEY),
+    model: provider === 'openai' ? openaiModel : anthropicModel,
+  });
+});
+
 function extractOpenAIText(data) {
   if (typeof data.output_text === 'string') return data.output_text;
 
@@ -103,7 +112,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     if (result.error) {
-      return res.status(result.status || 500).json({ error: result.error });
+      return res.status(result.status || 500).json({ error: result.error, provider });
     }
 
     return res.json({ text: result.text || '' });

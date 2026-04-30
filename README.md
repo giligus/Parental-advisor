@@ -76,6 +76,14 @@ npm start
 
 `npm start` serves the built Vite app from `dist/` and exposes `POST /api/chat`.
 
+You can also check deployment configuration without exposing secrets:
+
+```txt
+GET /api/health
+```
+
+It returns the selected provider, model, and whether the matching key is configured.
+
 ## Railway Deployment
 
 Set one provider configuration in Railway.
@@ -110,6 +118,7 @@ The included `railway.json` sets the start command to `npm start`.
 - Do not use `VITE_ANTHROPIC_API_KEY`, `VITE_OPENAI_API_KEY`, or any browser-exposed API key.
 - Do not call Anthropic or OpenAI from browser code.
 - Keep API keys server-side through `server.js` and `/api/chat`.
+- Use `/api/health` to verify provider configuration; it never returns the key value.
 - Case memory is stored locally in the browser via `localStorage`; users can export or clear it from the Status screen.
 
 ## Scripts
