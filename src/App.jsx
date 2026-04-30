@@ -10,8 +10,47 @@ import AdvisorAvatar, { ChatAvatar, getExpression, AVATAR_CSS } from './AdvisorA
 
 const EMPTY_CASE = { profiles: {}, events: [], insights: [], activeProfileId: null, pendingIntake: null };
 
-function naturalRouterResponse(route, lang) {
+function isNameOnly(text) {
+  const trimmed = text.trim();
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  return words.length <= 2
+    && trimmed.length >= 2
+    && trimmed.length <= 24
+    && !/[?!.]/.test(trimmed)
+    && !/(קרה|היום|אתמול|פיצוץ|מסך|בכי|צעק|ריב|בעיה|קשה|help|problem|screen|today|yesterday)/i.test(trimmed);
+}
+
+function isAssumptionCorrection(text) {
+  return /(לא אמרתי|לא סיפרתי|איך אתה יודע|אתה מניח|אל תניח|i did not say|i didn't say|how do you know|you assumed)/i.test(text);
+}
+
+function naturalRouterResponse(route, lang, userText = '') {
   const he = lang === 'he';
+  if (isAssumptionCorrection(userText)) {
+    return he
+      ? 'צודק, קפצתי צעד קדימה והנחתי שהיה אירוע לפני שסיפרת לי. תודה שתיקנת אותי. נתחיל נקי: מה תרצה שאדע או במה תרצה להתמקד?'
+      : "You're right, I jumped a step ahead and assumed there was an event before you told me. Thanks for correcting me. Let's start clean: what would you like me to know or focus on?";
+  }
+  if (route.mode === 'clarifying' && isNameOnly(userText)) {
+    return he
+      ? `נעים להכיר, ${userText.trim()}. אני כאן איתך. במה תרצה שנתמקד היום?`
+      : `Nice to meet you, ${userText.trim()}. I'm here with you. What would you like to focus on today?`;
+  }
+  if (route.mode === 'greeting') {
+    return he
+      ? 'שלום, טוב שחזרתם. תרצו לספר מה מעסיק אתכם היום, או להמשיך מהנושא האחרון?'
+      : 'Hi, good to see you back. Would you like to tell me what is on your mind today, or continue from the last topic?';
+  }
+  if (route.mode === 'clarifying') {
+    return he
+      ? 'אני איתך. ספרו לי קצת מה מעסיק אתכם, ומשם נבין יחד מה נכון לעשות.'
+      : "I'm with you. Tell me a little about what's on your mind, and we will work it through from there.";
+  }
+  if (route.mode === 'event_intake') {
+    return he
+      ? 'אוקיי, זה נשמע כמו אירוע שכדאי להבין לפני שמנתחים. מה קרה בפועל, ומה אתם אמרתם או עשיתם באותו רגע?'
+      : 'Okay, this sounds like something worth understanding before analyzing. What happened in practice, and what did you say or do at that moment?';
+  }
   const responses = {
     greeting: he
       ? 'שלום, טוב שחזרתם. תרצו לספר מה קרה היום, או להמשיך מהנושא האחרון?'
@@ -157,7 +196,7 @@ export default function App() {
 
     if (!route.synthesis) {
       const userMsg = { role: 'user', text: m };
-      const response = naturalRouterResponse(route, lang);
+      const response = naturalRouterResponse(route, lang, m);
       if (route.mode === 'simulation') setTab('sim');
       if (route.mode === 'event_intake') {
         setCaseData(prev => ({
