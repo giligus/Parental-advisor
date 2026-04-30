@@ -24,12 +24,31 @@ function isAssumptionCorrection(text) {
   return /(לא אמרתי|לא סיפרתי|איך אתה יודע|אתה מניח|אל תניח|i did not say|i didn't say|how do you know|you assumed)/i.test(text);
 }
 
+function isProfileFragment(text) {
+  return /(ילד|ילדה|בן|בת|אמא|אבא|הורה|תלמיד|תלמידה|child|daughter|son|parent|student)/i.test(text);
+}
+
 function naturalRouterResponse(route, lang, userText = '') {
   const he = lang === 'he';
   if (isAssumptionCorrection(userText)) {
     return he
       ? 'צודק, קפצתי צעד קדימה והנחתי שהיה אירוע לפני שסיפרת לי. תודה שתיקנת אותי. נתחיל נקי: מה תרצה שאדע או במה תרצה להתמקד?'
       : "You're right, I jumped a step ahead and assumed there was an event before you told me. Thanks for correcting me. Let's start clean: what would you like me to know or focus on?";
+  }
+  if (route.mode === 'fragment_intake') {
+    if (isProfileFragment(userText)) {
+      return he
+        ? 'הבנתי, מדובר בילד או בפרופיל שחשוב שנכיר. תספרו לי במשפט אחד: בן כמה הוא ומה הדבר המרכזי שהייתם רוצים להבין או לשנות?'
+        : 'Got it, this is about a child or profile we should understand. Tell me in one sentence: how old are they, and what is the main thing you want to understand or change?';
+    }
+    if (isNameOnly(userText)) {
+      return he
+        ? `נעים להכיר, ${userText.trim()}. אני כאן איתך. במה תרצה שנתמקד היום?`
+        : `Nice to meet you, ${userText.trim()}. I'm here with you. What would you like to focus on today?`;
+    }
+    return he
+      ? 'הבנתי. תנו לי עוד משפט אחד כדי שאדע לאן לקחת את זה: על מי מדובר ומה הדבר שחשוב לכם להבין?'
+      : 'Got it. Give me one more sentence so I know where to take this: who is this about, and what matters most to understand?';
   }
   if (route.mode === 'clarifying' && isNameOnly(userText)) {
     return he
@@ -56,14 +75,14 @@ function naturalRouterResponse(route, lang, userText = '') {
       ? 'שלום, טוב שחזרתם. תרצו לספר מה קרה היום, או להמשיך מהנושא האחרון?'
       : 'Hi, good to see you back. Would you like to tell me what happened today, or continue from the last topic?',
     clarifying: he
-      ? 'אני איתך. ספרו לי מה קרה, ומשם נבין יחד מה נכון לעשות. מה היה הרגע הראשון שבו זה התחיל להידרדר?'
-      : "I'm with you. Tell me what happened, and we will work it through from there. What was the first moment things started to go off track?",
+      ? 'אני איתך. ספרו לי קצת מה מעסיק אתכם, ומשם נבין יחד מה נכון לעשות.'
+      : "I'm with you. Tell me a little about what's on your mind, and we will work it through from there.",
     empathic: he
       ? 'זה נשמע ממש שוחק. לפני שננסה לפתור, בואו נעשה רגע סדר: מה קרה ממש לפני שהרגשתם שזה יוצא משליטה?'
       : 'That sounds really draining. Before trying to fix it, let us map it gently: what happened right before it felt out of control?',
     event_intake: he
-      ? 'אוקיי, זה נשמע כמו אירוע שכדאי להבין לפני שמנתחים. מה היה הרגע הראשון שבו זה התחיל להידרדר, ומה אתם אמרתם או עשיתם אז?'
-      : 'Okay, this sounds like something worth understanding before analyzing. What was the first moment it started to go downhill, and what did you say or do then?',
+      ? 'אוקיי, זה נשמע כמו אירוע שכדאי להבין לפני שמנתחים. מה קרה בפועל, ומה אתם אמרתם או עשיתם באותו רגע?'
+      : 'Okay, this sounds like something worth understanding before analyzing. What happened in practice, and what did you say or do at that moment?',
     action_plan: he
       ? 'כן. כרגע הייתי נשאר עם תוכנית פשוטה: התראה קצרה לפני המעבר, בחירה מוגבלת, משפט גבול קצר בזמן ההתנגדות, ושיחת תיקון רק אחרי רגיעה.'
       : 'Yes. I would keep the plan simple: a short warning before the transition, a limited choice, one short boundary sentence during resistance, and repair only after things settle.',
