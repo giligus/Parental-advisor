@@ -28,14 +28,28 @@ function isProfileFragment(text) {
   return /(ילד|ילדה|בן|בת|אמא|אבא|הורה|תלמיד|תלמידה|child|daughter|son|parent|student)/i.test(text);
 }
 
+function isRelationalFragment(text) {
+  return /(משמאל|מימין|לידי|איתי|שלי|אצלי|בצד|left|right|next to|with me)/i.test(text);
+}
+
 function naturalRouterResponse(route, lang, userText = '') {
   const he = lang === 'he';
+  if (route.mode === 'continue_last_topic') {
+    return he
+      ? 'בשמחה. כדי שאמשיך בדיוק מהמקום הנכון, תזכיר לי במשפט אחד מה היה הנושא האחרון מבחינתך?'
+      : 'Of course. To continue from the right place, remind me in one sentence what the last topic was for you?';
+  }
   if (isAssumptionCorrection(userText)) {
     return he
       ? 'צודק, קפצתי צעד קדימה והנחתי שהיה אירוע לפני שסיפרת לי. תודה שתיקנת אותי. נתחיל נקי: מה תרצה שאדע או במה תרצה להתמקד?'
       : "You're right, I jumped a step ahead and assumed there was an event before you told me. Thanks for correcting me. Let's start clean: what would you like me to know or focus on?";
   }
   if (route.mode === 'fragment_intake') {
+    if (isRelationalFragment(userText)) {
+      return he
+        ? 'הבנתי. אני צריך עוד טיפת הקשר כדי לא לנחש: מי זה, ומה חשוב לי להבין לגביו?'
+        : 'Got it. I need a little more context so I do not guess: who is this, and what should I understand about them?';
+    }
     if (isProfileFragment(userText)) {
       return he
         ? 'הבנתי, מדובר בילד או בפרופיל שחשוב שנכיר. תספרו לי במשפט אחד: בן כמה הוא ומה הדבר המרכזי שהייתם רוצים להבין או לשנות?'

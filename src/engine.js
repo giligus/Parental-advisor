@@ -143,11 +143,30 @@ function isGreeting(text) {
   return ['שלום', 'היי', 'הי', 'אהלן', 'hi', 'hello'].includes(normalized);
 }
 
+function isLastTopicRequest(text) {
+  const normalized = text
+    .trim()
+    .toLowerCase()
+    .replace(/[!?.,"'\s]+$/g, '')
+    .replace(/\s+/g, ' ');
+
+  return [
+    '\u05de\u05d4\u05e0\u05d5\u05e9\u05d0 \u05d4\u05d0\u05d7\u05e8\u05d5\u05df',
+    '\u05d4\u05e0\u05d5\u05e9\u05d0 \u05d4\u05d0\u05d7\u05e8\u05d5\u05df',
+    '\u05e0\u05d5\u05e9\u05d0 \u05d0\u05d7\u05e8\u05d5\u05df',
+    '\u05dc\u05d4\u05de\u05e9\u05d9\u05da \u05de\u05d4\u05e0\u05d5\u05e9\u05d0 \u05d4\u05d0\u05d7\u05e8\u05d5\u05df',
+    'last topic',
+    'continue last topic',
+    'continue from last topic',
+  ].includes(normalized);
+}
+
 export function detectConversationType(msg) {
   const text = msg.trim();
 
   if (hasAny(text, ['פגע', 'מכה', 'סכין', 'התאבד', 'לא בטוח', 'מסוכן', 'hurt', 'knife', 'suicide', 'unsafe'])) return 'safety';
   if (isGreeting(text)) return 'greeting';
+  if (isLastTopicRequest(text)) return 'continue_last_topic';
   if (hasAny(text, ['לא אמרתי', 'לא סיפרתי', 'איך אתה יודע', 'אתה מניח', 'אל תניח', 'i did not say', "i didn't say", 'how do you know', 'you assumed'])) return 'correction';
   if (hasAny(text, ['סימולציה', 'תרגול', 'תשחק', 'נתרגל', 'practice', 'roleplay'])) return 'simulation';
   if (hasAny(text, ['סיכום', 'השבוע', 'מה השתנה', 'weekly review'])) return 'weekly_review';
@@ -160,7 +179,7 @@ export function detectConversationType(msg) {
 }
 
 export function checkContextSufficiency(msg, conversationType) {
-  if (['greeting', 'open', 'fragment', 'correction', 'distress'].includes(conversationType)) {
+  if (['greeting', 'open', 'fragment', 'correction', 'continue_last_topic', 'distress'].includes(conversationType)) {
     return { enoughForEvent: false, enoughForSynthesis: false, missing: 'event_details' };
   }
 
@@ -185,6 +204,7 @@ export function routeMessage(msg) {
 
   if (conversationType === 'safety') return { mode: 'safety', synthesis: true, context };
   if (conversationType === 'greeting') return { mode: 'greeting', synthesis: false, context };
+  if (conversationType === 'continue_last_topic') return { mode: 'continue_last_topic', synthesis: false, context };
   if (conversationType === 'correction') return { mode: 'correction', synthesis: false, context };
   if (conversationType === 'fragment') return { mode: 'fragment_intake', synthesis: false, context };
   if (conversationType === 'open') return { mode: 'clarifying', synthesis: false, context };
