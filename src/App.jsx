@@ -6,7 +6,7 @@ import { Gauge, ProfileCard, TypingIndicator, EmptyState } from './components';
 import { SIM_SCENARIOS, QUICK_MESSAGES } from './scenarios';
 import { saveCase, loadCase, clearCase, saveSession, getSessions, computeProgress, buildWeeklyReviewPrompt, shouldShowAdvisorPresence } from './session';
 import { isTTSSupported, initTTS, speak, stopSpeaking, isSpeaking as checkSpeaking, isSTTSupported, startListening, stopListening } from './voice';
-import AdvisorAvatar, { ChatAvatar, getExpression, AVATAR_CSS } from './AdvisorAvatar';
+import AdvisorAvatar, { getExpression, AVATAR_CSS } from './AdvisorAvatar';
 
 const EMPTY_CASE = { profiles: {}, events: [], insights: [], activeProfileId: null, pendingIntake: null };
 
@@ -438,14 +438,22 @@ export default function App() {
   const quickMsgs = QUICK_MESSAGES[lang] || QUICK_MESSAGES.he;
   const scenarios = SIM_SCENARIOS[lang] || SIM_SCENARIOS.he;
   const progress = computeProgress(caseData.events);
+  const advisorStageStatus = typing
+    ? (isHe ? 'חושבת...' : 'Thinking...')
+    : speaking
+      ? (isHe ? 'מדברת...' : 'Speaking...')
+      : listening
+        ? (isHe ? 'מקשיבה...' : 'Listening...')
+        : simActive
+          ? (isHe ? 'בתרגול' : 'Practice')
+          : (isHe ? 'כאן איתכם' : 'Here with you');
 
   return (
     <div style={{ color: t.text, background: t.bg, height: '100%', display: 'flex', flexDirection: 'column', direction: dir, overflow: 'hidden', paddingTop: 'var(--sat)', paddingBottom: 'var(--sab)', paddingLeft: 'var(--sal)', paddingRight: 'var(--sar)' }}>
       <style>{AVATAR_CSS}</style>
 
-      {/* ── HEADER with Avatar ── */}
+      {/* ── HEADER ── */}
       <header style={{ padding: '10px 16px', background: t.surface, borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-        <AdvisorAvatar expression={avatarExpression} isSpeaking={speaking} size={42} theme={t} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 15 }}>{isHe ? 'היועץ שלכם' : 'Your Advisor'}</div>
           <div style={{ fontSize: 11, color: t.textDim, marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -480,17 +488,91 @@ export default function App() {
       <main style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
         {/* CHAT */}
-        {tab === 'chat' && <>
-          <div ref={chatRef} style={{ flex: 1, overflowY: 'auto', padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 8, WebkitOverflowScrolling: 'touch' }}>
+        {tab === 'chat' && <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <section style={{
+            flexShrink: 0,
+            minHeight: 270,
+            padding: '18px 16px 14px',
+            borderBottom: `1px solid ${t.border}`,
+            background: `radial-gradient(circle at 50% 40%, ${t.accent}18 0%, transparent 42%), ${t.bg}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
+            <div style={{ width: '100%', maxWidth: 560, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+              <AdvisorAvatar
+                expression={avatarExpression}
+                isSpeaking={speaking}
+                size={220}
+                theme={t}
+                style={{ margin: '0 auto' }}
+              />
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, flexWrap: 'wrap' }}>
+                <div aria-live="polite" style={{
+                  minWidth: 92,
+                  textAlign: 'center',
+                  padding: '6px 12px',
+                  borderRadius: 999,
+                  background: t.surface,
+                  border: `1px solid ${t.border}`,
+                  color: t.textSoft,
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}>
+                  {advisorStageStatus}
+                </div>
+
+                {ttsAvailable && (
+                  <button onClick={() => { setVoiceEnabled(v => !v); if (voiceEnabled) stopSpeaking(); }} style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 999,
+                    border: `1px solid ${voiceEnabled ? t.accent + '70' : t.border}`,
+                    background: voiceEnabled ? t.accent + '18' : t.surface,
+                    color: voiceEnabled ? t.accent : t.textDim,
+                    cursor: 'pointer',
+                    fontSize: 15,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontFamily: 'inherit',
+                    transition: 'all .2s',
+                  }} title={isHe ? 'קול' : 'Voice'}>
+                    {voiceEnabled ? '🔊' : '🔇'}
+                  </button>
+                )}
+
+                {sttAvailable && (
+                  <button onClick={toggleMic} disabled={typing} style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 999,
+                    border: listening ? `2px solid ${t.red}` : `1px solid ${t.border}`,
+                    background: listening ? t.red + '15' : t.surface,
+                    color: listening ? t.red : t.textDim,
+                    cursor: typing ? 'default' : 'pointer',
+                    fontSize: 15,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontFamily: 'inherit',
+                    transition: 'all .2s',
+                    animation: listening ? 'micPulse 1.5s ease-in-out infinite' : 'none',
+                    opacity: typing ? 0.45 : 1,
+                  }} title={isHe ? 'מיקרופון' : 'Microphone'}>
+                    🎤
+                  </button>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <div ref={chatRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8, WebkitOverflowScrolling: 'touch' }}>
             {msgs.map((m, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start', animation: 'slideIn .3s ease' }}>
-                {m.role === 'advisor' && (
-                  <div style={{ [isHe ? 'marginLeft' : 'marginRight']: 7, marginTop: 2, flexShrink: 0 }}>
-                    <ChatAvatar expression={m.presenceReason ? 'encouraging' : m.isSim ? 'neutral' : m.isInsight ? 'thinking' : avatarExpression} isSpeaking={speaking && i === msgs.length - 1} theme={t} isSim={m.isSim} />
-                  </div>
-                )}
                 <div style={{
-                  maxWidth: '82%', padding: m.isSystem ? '8px 14px' : '11px 15px',
+                  maxWidth: m.role === 'user' ? '74%' : 'min(760px, 86%)', padding: m.isSystem ? '8px 14px' : '11px 15px',
                   borderRadius: m.role === 'user' ? (isHe ? '16px 16px 4px 16px' : '16px 16px 16px 4px') : (isHe ? '16px 16px 16px 4px' : '16px 16px 4px 16px'),
                   background: m.role === 'user' ? t.userBubble : m.isInsight ? t.accent + '12' : t.advisorBubble,
                   color: m.role === 'user' ? '#fff' : m.isSystem ? t.textDim : t.textSoft,
@@ -543,7 +625,7 @@ export default function App() {
               </div>
             )}
           </div>
-        </>}
+        </div>}
 
         {/* PROFILES */}
         {tab === 'profiles' && (

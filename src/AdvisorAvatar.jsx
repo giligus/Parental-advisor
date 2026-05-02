@@ -49,6 +49,8 @@ export default function AdvisorAvatar({
   const t = theme || {};
   const scale = 1 + breath;
   const ringColor = expr.glow;
+  const imageScale = size >= 180 ? 1.12 : size >= 64 ? 1.78 : 1.7;
+  const speakingImageScale = imageScale + (size >= 180 ? 0.02 : 0.03);
 
   return (
     <div
@@ -96,13 +98,15 @@ export default function AdvisorAvatar({
           draggable="false"
           className="advisor-character-image"
           style={{
+            '--advisor-image-scale': String(imageScale),
+            '--advisor-image-speak-scale': String(speakingImageScale),
             width: '100%',
             height: '100%',
             objectFit: 'cover',
-            objectPosition: size >= 64 ? '50% 18%' : '50% 22%',
-            transform: size >= 64 ? 'scale(1.78)' : 'scale(1.7)',
+            objectPosition: size >= 180 ? '50% 30%' : size >= 64 ? '50% 18%' : '50% 22%',
+            transform: `scale(${imageScale})`,
             filter: expr.filter,
-            transformOrigin: '50% 22%',
+            transformOrigin: size >= 180 ? '50% 34%' : '50% 22%',
           }}
         />
 
@@ -183,8 +187,8 @@ export const AVATAR_CSS = `
 }
 
 @keyframes advisorCharacterSpeak {
-  0%, 100% { transform: translateY(0) scale(1.78); }
-  50% { transform: translateY(-0.8%) scale(1.81); }
+  0%, 100% { transform: translateY(0) scale(var(--advisor-image-scale, 1.78)); }
+  50% { transform: translateY(-0.8%) scale(var(--advisor-image-speak-scale, 1.81)); }
 }
 
 @keyframes advisorMouthPulse {
