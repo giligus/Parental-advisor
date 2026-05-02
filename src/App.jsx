@@ -4,7 +4,7 @@ import { computeState, extractEvent, selectPolicy, detectCommand, routeMessage }
 import { buildSystemPrompt, getGreeting, getAdvisorResponse, extractProfiles, getSimFeedback, getSimIntro, getWeeklyReview } from './api';
 import { Gauge, ProfileCard, TypingIndicator, EmptyState } from './components';
 import { SIM_SCENARIOS, QUICK_MESSAGES } from './scenarios';
-import { saveCase, loadCase, clearCase, computeProgress, buildWeeklyReviewPrompt, shouldShowAdvisorPresence } from './session';
+import { saveCase, loadCase, clearCase, saveSession, getSessions, computeProgress, buildWeeklyReviewPrompt, shouldShowAdvisorPresence } from './session';
 import { isTTSSupported, initTTS, speak, stopSpeaking, isSpeaking as checkSpeaking, isSTTSupported, startListening, stopListening } from './voice';
 import AdvisorAvatar, { ChatAvatar, getExpression, AVATAR_CSS } from './AdvisorAvatar';
 
@@ -97,6 +97,41 @@ function safetyResponse(lang) {
   return lang === 'he'
     ? 'קודם כל בטיחות. אם יש סכנה מיידית לעצמכם, לילד, או למישהו בבית, עוצרים את הייעוץ הרגיל ופונים עכשיו לעזרה מקומית מתאימה או לשירותי חירום. אחרי שכולם בטוחים, אפשר לחזור ולחשוב יחד מה קרה.'
     : 'Safety comes first. If there is immediate danger to you, the child, or anyone at home, pause the normal advice and contact local emergency or professional support now. Once everyone is safe, we can come back and understand what happened.';
+}
+
+function buildConversationHistory(messages) {
+  const clean = [];
+
+  for (const message of messages) {
+    if (!message || message.isSystem || message.isError || !message.text) continue;
+
+    const role = message.role === 'user' ? 'user' : 'assistant';
+    const content = String(message.text).trim();
+    if (!content) continue;
+
+    const previous = clean[clean.length - 1];
+    if (previous?.role === role) {
+      previous.content = `${previous.content}\n\n${content}`;
+    } else {
+      clean.push({ role, content });
+    }
+  }
+
+  while (clean.length > 0 && clean[0].role !== 'user') clean.shift();
+  return clean.slice(-12);
+}
+
+function createAdvisorInsight({ type, title, summary, supportingEventId, progress, routeMode }) {
+  return {
+    id: `insight_${Date.now()}`,
+    createdAt: new Date().toISOString(),
+    type,
+    title,
+    summary,
+    routeMode,
+    supportingEvents: supportingEventId ? [supportingEventId] : [],
+    progressDirection: progress?.direction || null,
+  };
 }
 
 export default function App() {
@@ -232,6 +267,7 @@ export default function App() {
         }));
       }
       setMsgs(p => [...p, userMsg, { role: 'advisor', text: response }]);
+      saveSession({ routeMode: route.mode, userMessage: m, advisorMessage: response, eventCreated: false });
       speakText(response);
       return;
     }
@@ -239,6 +275,7 @@ export default function App() {
     if (route.mode === 'safety') {
       const response = safetyResponse(lang);
       setMsgs(p => [...p, { role: 'user', text: m }, { role: 'advisor', text: response, isInsight: true }]);
+      saveSession({ routeMode: route.mode, userMessage: m, advisorMessage: response, eventCreated: false, safety: true });
       speakText(response);
       return;
     }
@@ -250,8 +287,17 @@ export default function App() {
       const progress = computeProgress(caseData.events);
       const reviewPrompt = buildWeeklyReviewPrompt(lang, caseData, state, progress);
       const review = await getWeeklyReview(reviewPrompt);
+      const reviewInsight = createAdvisorInsight({
+        type: route.mode,
+        title: route.mode === 'weekly_review' ? 'Weekly review' : 'Big picture synthesis',
+        summary: review,
+        progress,
+        routeMode: route.mode,
+      });
+      setCaseData(prev => ({ ...prev, insights: [...(prev.insights || []), reviewInsight] }));
       setMsgs(p => [...p, { role: 'advisor', text: review, isInsight: true }]);
       setTyping(false);
+      saveSession({ routeMode: route.mode, userMessage: m, advisorMessage: review, eventCreated: false, insightId: reviewInsight.id });
       speakText(review);
       return;
     }
@@ -280,23 +326,31 @@ export default function App() {
     const progressHint = progress ? `\n${isHe ? 'מגמה' : 'Trend'}: ${progress.direction}` : '';
     
     const sys = buildSystemPrompt(lang, newCase, newState, policy, profileHint + progressHint);
-    const history = [...msgs, userMsg].slice(-14).map(x => ({ role: x.role === 'user' ? 'user' : 'assistant', content: x.text }));
-
-    const [reply, profiles] = await Promise.all([
-      getAdvisorResponse(sys, history),
-      extractProfiles([...msgs, userMsg].slice(-8)),
-    ]);
-
-    if (profiles.length > 0) {
-      setCaseData(prev => ({ ...prev, profiles: mergeProfiles(prev.profiles, profiles) }));
-    }
+    const history = buildConversationHistory([...msgs, userMsg]);
+    const reply = await getAdvisorResponse(sys, history);
 
     // Phase 2: Check for advisor presence moment
     const presenceReason = shouldShowAdvisorPresence(newCase, newState, event);
+    const advisorInsight = createAdvisorInsight({
+      type: presenceReason ? 'advisor_moment' : 'message_synthesis',
+      title: presenceReason || 'Advisor response',
+      summary: reply,
+      supportingEventId: event.id,
+      progress,
+      routeMode: route.mode,
+    });
     
     setMsgs(p => [...p, { role: 'advisor', text: reply, presenceReason }]);
     setTyping(false);
     speakText(reply);
+    saveSession({ routeMode: route.mode, userMessage: m, advisorMessage: reply, eventCreated: true, eventId: event.id, insightId: advisorInsight.id });
+
+    const profiles = await extractProfiles([...msgs, userMsg, { role: 'advisor', text: reply }].slice(-6));
+    setCaseData(prev => ({
+      ...prev,
+      profiles: profiles.length > 0 ? mergeProfiles(prev.profiles, profiles) : prev.profiles,
+      insights: [...(prev.insights || []), advisorInsight],
+    }));
   }, [caseData, msgs, typing, lang, isHe, mergeProfiles, state, speakText]);
 
   const send = useCallback(() => sendText(input), [input, sendText]);
@@ -325,7 +379,7 @@ export default function App() {
     const payload = {
       exportedAt: new Date().toISOString(),
       caseData,
-      sessions: [],
+      sessions: getSessions(),
     };
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);

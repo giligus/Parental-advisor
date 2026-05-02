@@ -51,6 +51,7 @@ export function extractEvent(msg) {
     type,
     trigger,
     outcome,
+    raw: msg,
     date: new Date().toISOString().split('T')[0],
   };
 }
