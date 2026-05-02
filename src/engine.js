@@ -92,11 +92,23 @@ export function selectPolicy(state) {
 }
 
 export function detectCommand(msg) {
-  const lower = msg.toLowerCase();
-  if (/dark\s*mode|מצב כהה|תעבור לכהה|עיצוב כהה/.test(lower)) return { type: 'theme', value: 'dark' };
-  if (/light\s*mode|מצב בהיר|תעבור לבהיר|עיצוב בהיר/.test(lower)) return { type: 'theme', value: 'light' };
-  if (/english|אנגלית|תעבור לאנגלית|switch.*(to|lang).*eng/.test(lower)) return { type: 'lang', value: 'en' };
-  if (/עברית|hebrew|תעבור לעברית|switch.*(to|lang).*heb/.test(lower)) return { type: 'lang', value: 'he' };
+  const normalized = msg
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?؟،,]+$/g, '')
+    .replace(/\s+/g, ' ');
+
+  if (normalized.length > 32 || normalized.split(' ').length > 4) return null;
+
+  const darkCommands = new Set(['dark mode', 'מצב כהה', 'תעבור לכהה', 'עיצוב כהה']);
+  const lightCommands = new Set(['light mode', 'מצב בהיר', 'תעבור לבהיר', 'עיצוב בהיר']);
+  const englishCommands = new Set(['english', 'אנגלית', 'תעבור לאנגלית', 'switch to english']);
+  const hebrewCommands = new Set(['עברית', 'hebrew', 'תעבור לעברית', 'switch to hebrew']);
+
+  if (darkCommands.has(normalized)) return { type: 'theme', value: 'dark' };
+  if (lightCommands.has(normalized)) return { type: 'theme', value: 'light' };
+  if (englishCommands.has(normalized)) return { type: 'lang', value: 'en' };
+  if (hebrewCommands.has(normalized)) return { type: 'lang', value: 'he' };
   return null;
 }
 
@@ -121,12 +133,20 @@ function isShortFragment(text) {
   ]);
 }
 
+function isGreeting(text) {
+  const normalized = text
+    .trim()
+    .toLowerCase()
+    .replace(/[!?.,"'\s]+$/g, '')
+    .replace(/\s+/g, ' ');
+  return ['שלום', 'היי', 'הי', 'אהלן', 'hi', 'hello'].includes(normalized);
+}
+
 export function detectConversationType(msg) {
   const text = msg.trim();
-  const compact = text.replace(/[!?.,"'\s]/g, '');
 
   if (hasAny(text, ['פגע', 'מכה', 'סכין', 'התאבד', 'לא בטוח', 'מסוכן', 'hurt', 'knife', 'suicide', 'unsafe'])) return 'safety';
-  if (compact.length <= 18 && hasAny(compact, ['שלום', 'היי', 'הי', 'אהלן', 'hi', 'hello'])) return 'greeting';
+  if (isGreeting(text)) return 'greeting';
   if (hasAny(text, ['לא אמרתי', 'לא סיפרתי', 'איך אתה יודע', 'אתה מניח', 'אל תניח', 'i did not say', "i didn't say", 'how do you know', 'you assumed'])) return 'correction';
   if (hasAny(text, ['סימולציה', 'תרגול', 'תשחק', 'נתרגל', 'practice', 'roleplay'])) return 'simulation';
   if (hasAny(text, ['סיכום', 'השבוע', 'מה השתנה', 'weekly review'])) return 'weekly_review';

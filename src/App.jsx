@@ -207,8 +207,16 @@ export default function App() {
     // Settings commands
     const cmd = detectCommand(m);
     if (cmd) {
-      if (cmd.type === 'theme') { setTheme(cmd.value); setMsgs(p => [...p, { role: 'user', text: m }, { role: 'advisor', text: cmd.value === 'dark' ? (isHe ? 'עברתי לעיצוב כהה.' : 'Switched to dark mode.') : (isHe ? 'עברתי לעיצוב בהיר.' : 'Switched to light mode.'), isSystem: true }]); return; }
-      if (cmd.type === 'lang') { setLang(cmd.value); setMsgs(p => [...p, { role: 'user', text: m }, { role: 'advisor', text: cmd.value === 'en' ? "Switched to English." : 'עברתי לעברית.', isSystem: true }]); return; }
+      if (cmd.type === 'theme') {
+        setTheme(cmd.value);
+        setMsgs(p => [...p, { role: 'user', text: m }, { role: 'advisor', text: cmd.value === 'dark' ? (isHe ? 'עברתי לעיצוב כהה.' : 'Switched to dark mode.') : (isHe ? 'עברתי לעיצוב בהיר.' : 'Switched to light mode.'), isSystem: true }]);
+        return;
+      }
+      if (cmd.type === 'lang') {
+        setLang(cmd.value);
+        setMsgs(p => [...p, { role: 'user', text: m }, { role: 'advisor', text: cmd.value === 'en' ? "Switched to English." : 'עברתי לעברית.', isSystem: true }]);
+        return;
+      }
     }
 
     const route = routeMessage(m);
