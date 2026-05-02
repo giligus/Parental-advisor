@@ -164,7 +164,7 @@ export default function App() {
   const [lastPolicy, setLastPolicy] = useState(null);
   const [lastEventOutcome, setLastEventOutcome] = useState(null);
   // Phase 3
-  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [speaking, setSpeaking] = useState(false);
   const [listening, setListeningState] = useState(false);
   const [ttsAvailable, setTtsAvailable] = useState(false);
