@@ -159,6 +159,74 @@ export async function getAdvisorResponse(systemPrompt, conversationHistory) {
   return lastApiError ? friendlyApiFallback(systemPrompt) : 'ספרו לי עוד.';
 }
 
+export async function getNaturalRoutedResponse({ lang, route, caseData, conversationHistory, userText }) {
+  const he = lang === 'he';
+  const profiles = Object.values(caseData?.profiles || {});
+  const recentEvents = (caseData?.events || []).slice(-5);
+  const routeMode = route?.mode || 'open';
+  const missing = route?.context?.missing || null;
+
+  const caseContext = [
+    profiles.length
+      ? `${he ? 'פרופילים ידועים' : 'Known profiles'}: ${profiles.map(profile => {
+          const age = profile.age ? `, ${he ? 'גיל' : 'age'} ${profile.age}` : '';
+          return `${profile.name || 'unknown'} (${profile.role || 'other'}${age})`;
+        }).join('; ')}`
+      : '',
+    recentEvents.length
+      ? `${he ? 'אירועים אחרונים' : 'Recent events'}: ${recentEvents.map(event => `${event.date}: ${event.type}/${event.outcome} "${event.raw || ''}"`).join(' | ')}`
+      : '',
+  ].filter(Boolean).join('\n');
+
+  const modeGuideHe = {
+    greeting: 'זו ברכה בלבד. ענה קצר, חם ומזמין, ושאל במה נרצה להתמקד היום.',
+    continue_last_topic: 'המשתמש מבקש להמשיך מנושא קודם. אם אין מספיק הקשר, בקש תזכורת קצרה בלי להמציא היסטוריה.',
+    correction: 'המשתמש מתקן הנחה שלך. קבל את התיקון בקצרה, בלי להתגונן, והתחל נקי.',
+    fragment_intake: 'זו הודעה חלקית. אל תנתח. שאל שאלה אחת קצרה שתעזור להבין על מי או על מה מדובר.',
+    clarifying: 'זו פתיחה כללית. ענה אנושית ושאל שאלה אחת שמזמינה לספר מה קורה.',
+    empathic: 'יש מצוקה רגשית. קודם תן תיקוף רגשי, ואז שאל שאלה אחת עדינה.',
+    event_intake: `זה נראה כמו דיווח אירוע חלקי. אל תיצור ניתוח מלא. שאל שאלה אחת חסרה בהקשר. הפרט החסר: ${missing || 'הקשר האירוע'}.`,
+    action_plan: 'המשתמש מבקש כיוון או תוכנית. אם יש מספיק הקשר, תן צעד אחד-שניים; אם חסר הקשר, שאל שאלה אחת ממוקדת.',
+  };
+
+  const modeGuideEn = {
+    greeting: 'This is only a greeting. Reply briefly, warmly, and invite the user to share what they want to focus on.',
+    continue_last_topic: 'The user wants to continue a previous topic. If context is missing, ask for a short reminder without inventing history.',
+    correction: 'The user is correcting an assumption. Accept it briefly, do not defend yourself, and restart cleanly.',
+    fragment_intake: 'This is a partial fragment. Do not analyze. Ask one short question to understand who or what this is about.',
+    clarifying: 'This is an open start. Reply humanly and ask one inviting question.',
+    empathic: 'The user is emotionally distressed. Validate first, then ask one gentle question.',
+    event_intake: `This looks like a partial event report. Do not do a full analysis. Ask one missing contextual question. Missing detail: ${missing || 'event context'}.`,
+    action_plan: 'The user asks for direction or a plan. If there is enough context, give one or two steps; if context is missing, ask one focused question.',
+  };
+
+  const system = he
+    ? `את יועצת התנהגותית וירטואלית מתמשכת בשם מאיה.
+דברי בעברית טבעית, חמה, רגועה וישירה, כמו יועצת אנושית שמלווה תיק לאורך זמן.
+אל תחשפי שמות פנימיים כמו router, mode, state engine או synthesis.
+אל תמציאי פרטים, שמות, היסטוריה או אירועים שלא ניתנו.
+עני ב-1 עד 4 משפטים קצרים, ללא markdown וללא כותרות.
+אם חסר מידע, שאלי שאלה אחת בלבד.
+
+הנחיית מצב פנימית: ${modeGuideHe[routeMode] || modeGuideHe.clarifying}
+${caseContext ? `\nהקשר תיק פנימי, לשימוש עדין בלבד:\n${caseContext}` : ''}`
+    : `You are Maya, a continuous virtual behavioral advisor.
+Speak in natural, warm, calm, direct English, like a human advisor following a case over time.
+Do not reveal internal labels like router, mode, state engine, or synthesis.
+Do not invent details, names, history, or events not provided.
+Reply in 1 to 4 short sentences, no markdown and no headings.
+If information is missing, ask exactly one question.
+
+Internal response guide: ${modeGuideEn[routeMode] || modeGuideEn.clarifying}
+${caseContext ? `\nInternal case context, use gently:\n${caseContext}` : ''}`;
+
+  const history = conversationHistory?.length
+    ? conversationHistory
+    : [{ role: 'user', content: userText || (he ? 'שלום' : 'Hello') }];
+
+  return callAPI(system, history);
+}
+
 export async function extractProfiles(recentMessages) {
   const system = `Analyze this conversation and extract person profiles. Return ONLY valid JSON, no markdown.
 Format: {"profiles":[{"name":"string","role":"child|parent|partner|student|other","age":null,"challenges":[],"strengths":[],"triggers":[],"whatWorks":[],"notes":""}]}

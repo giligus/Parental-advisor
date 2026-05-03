@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { THEMES } from './themes';
 import { computeState, extractEvent, selectPolicy, detectCommand, routeMessage } from './engine';
-import { buildSystemPrompt, getGreeting, getAdvisorResponse, extractProfiles, getSimFeedback, getSimIntro, getWeeklyReview } from './api';
+import { buildSystemPrompt, getGreeting, getAdvisorResponse, getNaturalRoutedResponse, extractProfiles, getSimFeedback, getSimIntro, getWeeklyReview } from './api';
 import { Gauge, ProfileCard, TypingIndicator, EmptyState } from './components';
 import { SIM_SCENARIOS, QUICK_MESSAGES } from './scenarios';
 import { saveCase, loadCase, clearCase, saveSession, getSessions, computeProgress, buildWeeklyReviewPrompt, shouldShowAdvisorPresence } from './session';
@@ -272,7 +272,6 @@ export default function App() {
 
     if (!route.synthesis) {
       const userMsg = { role: 'user', text: m };
-      const response = naturalRouterResponse(route, lang, m);
       if (route.mode === 'simulation') setTab('sim');
       if (route.mode === 'event_intake') {
         setCaseData(prev => ({
@@ -280,7 +279,15 @@ export default function App() {
           pendingIntake: { text: m, missing: route.context.missing, date: new Date().toISOString() },
         }));
       }
-      setMsgs(p => [...p, userMsg, { role: 'advisor', text: response }]);
+      setMsgs(p => [...p, userMsg]);
+      setTyping(true);
+      const history = buildConversationHistory([...msgs, userMsg]);
+      const modelResponse = route.mode === 'simulation'
+        ? null
+        : await getNaturalRoutedResponse({ lang, route, caseData, conversationHistory: history, userText: m });
+      const response = modelResponse || naturalRouterResponse(route, lang, m);
+      setMsgs(p => [...p, { role: 'advisor', text: response }]);
+      setTyping(false);
       saveSession({ routeMode: route.mode, userMessage: m, advisorMessage: response, eventCreated: false });
       speakText(response);
       return;
