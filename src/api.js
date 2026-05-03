@@ -56,32 +56,57 @@ async function callAPI(system, messages) {
   }
 }
 
+export function buildCleanHistory(msgs) {
+  const filtered = (msgs || [])
+    .filter(item => item && !item.isErr && !item.isError && !item.isSystem)
+    .map(item => ({
+      role: item.role === 'user' ? 'user' : 'assistant',
+      content: String(item.text || item.content || '').trim(),
+    }))
+    .filter(item => item.content);
+
+  const merged = [];
+  for (const item of filtered) {
+    const last = merged[merged.length - 1];
+    if (last?.role === item.role) {
+      last.content = `${last.content}\n\n${item.content}`;
+    } else {
+      merged.push({ ...item });
+    }
+  }
+
+  while (merged.length > 0 && merged[0].role !== 'user') merged.shift();
+  return merged.slice(-12);
+}
+
 export function buildSystemPrompt(lang, caseData, state, policy, extra = '') {
   const he = lang === 'he';
 
   const base = he
-    ? `אתה יועץ התנהגותי מתמשך. אתה מדבר בעברית טבעית, רגועה, חמה וישירה, כמו יועץ שמכיר את התיק.
+    ? `את יועצת הורית והתנהגותית מתמשכת בשם מאיה. את מדברת בעברית טבעית, חמה וישירה, כמו יועצת אנושית שמכירה את המשפחה.
 
 כללי סגנון:
-- קודם אנושי, אחר כך מתודולוגי.
-- אל תחשוף שמות פנימיים כמו State Engine, Analyst Mode או Listener Mode.
-- אל תשתמש בכותרות, markdown, אחוזים או שפה מערכתית.
-- ענה ב-2 עד 6 משפטים קצרים.
-- אם חסר מידע, שאל שאלה קצרה אחת בלבד.
-- אם יש אירוע ברור, חבר אותו בעדינות למה שכבר ידוע.
-- אם המשתמש במצוקה, קודם תקף רגשית ורק אחר כך הצע כיוון.
-- כשאתה מציע ניסוח, תן משפט אחד שאפשר לומר בפועל.`
+- עני ב-2 עד 5 משפטים קצרים וטבעיים. לא יותר.
+- בלי כותרות, bullet points, markdown, אחוזים, מספרים או נתונים טכניים.
+- אל תחשפי שמות פנימיים כמו State Engine, Analyst Mode, Listener Mode או router.
+- אל תמציאי שמות, היסטוריה, קשרים משפחתיים או אירועים שלא נאמרו.
+- קודם אנושי, אחר כך מעשי. לא אקדמי ולא רשמי.
+- גווני פתיחות. אל תתחילי כל תשובה באותו "אני מבינה" או "זה נשמע קשה".
+- אם חסר מידע, שאלי שאלה אחת בלבד.
+- אם יש אירוע ברור, התייחסי אליו ישירות ואל תשאלי "מה קרה?" כאילו לא סופר.
+- כשאת מציעה ניסוח, תני משפט אחד טבעי בגרשיים.`
     : `You are a continuous behavioral advisor. Speak in natural, calm, warm English, like an advisor who knows the case.
 
 Style rules:
-- Human first, methodological second.
-- Do not expose internal labels like State Engine, Analyst Mode, or Listener Mode.
-- Do not use headers, markdown, percentages, or system language.
-- Reply in 2 to 6 short sentences.
+- Human first, practical second.
+- Do not expose internal labels like State Engine, Analyst Mode, Listener Mode, or router.
+- No headings, bullet points, markdown, percentages, numbers, or technical data.
+- Reply in 2 to 5 short natural sentences.
+- Do not invent names, history, family relationships, or events.
+- Vary your openings.
 - If information is missing, ask one short question only.
-- If there is a clear event, gently connect it to known context.
-- If the user is distressed, validate emotionally before advising.
-- When giving a script, give one practical sentence they can say.`;
+- If there is a clear event, answer that event directly.
+- When giving a script, give one natural sentence in quotes.`;
 
   const profiles = Object.values(caseData.profiles || {});
   const profileText = profiles.length
@@ -91,19 +116,13 @@ Style rules:
       }).join('\n')}`
     : '';
 
-  const eventText = (caseData.events || []).length
-    ? `\n\n${he ? 'הקשר תיק פנימי, לא להציג כנתונים טכניים' : 'Internal case context, do not present technically'}:
-${he ? 'אירועים' : 'Events'}: ${caseData.events.length}
-${he ? 'הסלמות' : 'Escalations'}: ${caseData.events.filter(event => event.outcome === 'escalation').length}
-${he ? 'שיפורים' : 'Improvements'}: ${caseData.events.filter(event => event.outcome === 'improvement').length}
-${he ? 'מטרה' : 'Objective'}: ${policy?.obj || ''}
-${he ? 'אסטרטגיה' : 'Strategy'}: ${policy?.strat || ''}
-${he ? 'להימנע' : 'Avoid'}: ${policy?.avoid || ''}`
-    : '';
-
-  const stateText = state
-    ? `\n\n${he ? 'מצב פנימי משוער' : 'Estimated internal state'}:
-childReg=${state.childReg}, parentReg=${state.parentReg}, conflict=${state.conflict}, trust=${state.trust}, risk=${state.risk}`
+  const escalations = (caseData.events || []).filter(event => event.outcome === 'escalation').length;
+  const improvements = (caseData.events || []).filter(event => event.outcome === 'improvement').length;
+  const eventText = (caseData.events || []).length >= 2
+    ? `\n\n${he ? 'הקשר פנימי לשיחה, לא להציג כנתונים' : 'Internal conversation context, do not present as data'}:
+${he ? 'כיוון כללי' : 'Overall direction'}: ${improvements > escalations ? (he ? 'נראה שיש גם דברים שמתחילים לעבוד' : 'some things are starting to work') : escalations > improvements ? (he ? 'יש כרגע כמה רגעים מאתגרים שחוזרים' : 'there are recurring challenging moments') : (he ? 'עדיין אוספים תמונה' : 'still forming a picture')}
+${he ? 'כיוון מומלץ' : 'Recommended direction'}: ${policy?.strat || ''}
+${he ? 'כדאי להימנע מ' : 'Worth avoiding'}: ${policy?.avoid || ''}`
     : '';
 
   const latestEvent = (caseData.events || []).slice(-1)[0];
@@ -138,7 +157,7 @@ Response guardrails:
 - Do not invent names, previous topics, history, or hidden facts.
 - Prefer a useful advisor response: recognition, pattern, objective, and one practical next sentence.`;
 
-  return `${base}${responseGuardrails}${profileText}${eventText}${stateText}${latestEventText}${playbookText}${extra || ''}`;
+  return `${base}${responseGuardrails}${profileText}${eventText}${latestEventText}${playbookText}${extra || ''}`;
 }
 
 export async function getGreeting(lang) {
@@ -149,7 +168,7 @@ export async function getGreeting(lang) {
 }
 
 export async function getAdvisorResponse(systemPrompt, conversationHistory) {
-  const response = await callAPI(systemPrompt, conversationHistory);
+  const response = await callAPI(systemPrompt, buildCleanHistory(conversationHistory));
   if (response) return response;
   return lastApiError ? friendlyApiFallback(systemPrompt) : 'ספרו לי עוד.';
 }
@@ -223,11 +242,24 @@ ${caseContext ? `\nInternal case context, use gently:\n${caseContext}` : ''}`;
 }
 
 export async function extractProfiles(recentMessages) {
-  const system = `Analyze this conversation and extract person profiles. Return ONLY valid JSON, no markdown.
-Format: {"profiles":[{"name":"string","role":"child|parent|partner|student|other","age":null,"challenges":[],"strengths":[],"triggers":[],"whatWorks":[],"notes":""}]}
-If no profile info is found, return {"profiles":[]}. Only include profiles with at least a name.`;
+  const system = `Extract person profiles from this parenting/advisory conversation.
+Return ONLY valid JSON, no markdown.
 
-  const content = recentMessages.map(item => `${item.role}: ${item.text}`).join('\n');
+Format:
+{"profiles":[{"name":"string","role":"child|parent|partner|sibling|student|other","age":null,"challenges":[],"strengths":[],"triggers":[],"whatWorks":[],"notes":""}]}
+
+Rules:
+- Create a profile for every named person being discussed, not only the speaker.
+- Infer role from context: "my son", "הבן שלי", "ילד", "בת 7" => child; "אחותו"/"brother" can be sibling/child.
+- Extract age when stated.
+- Extract challenges/triggers from behavior mentions such as screens, siblings, screaming, homework, transitions.
+- Do not invent names. If no named person appears, return {"profiles":[]}.
+- If a person is named but details are missing, still include them with role "other" and a short note.`;
+
+  const content = (recentMessages || [])
+    .filter(item => item && !item.isErr && !item.isError && !item.isSystem)
+    .map(item => `${item.role}: ${item.text || item.content || ''}`)
+    .join('\n');
   const raw = await callAPI(system, [{ role: 'user', content }]);
 
   if (!raw) return [];

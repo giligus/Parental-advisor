@@ -32,6 +32,7 @@ function cleanSubjectName(value = '') {
     .trim();
 
   if (!cleaned || cleaned.length > 32) return null;
+  if (/^(הוא|היא|אני|אנחנו|אתה|אתם|ילד|ילדה|בן|בת|הילד|הילדה|הבן|הבת|שלו|שלה|they|he|she|it)$/i.test(cleaned)) return null;
   if (/(מציק|מסך|פיצוץ|ריב|בעיה|קשה|צעק|בכה|עשה|קרה|today|problem|screen|meltdown)/i.test(cleaned)) return null;
   return cleaned;
 }
@@ -64,6 +65,112 @@ function profileIntakeResponse(userText, lang) {
   return lang === 'he'
     ? `בשמחה, נדבר על ${name}. מי זה ${name} מבחינתך, ומה הדבר העיקרי שחשוב לך להבין או לשנות לגביו?`
     : `Of course, let's talk about ${name}. Who is ${name} to you, and what is the main thing you want to understand or change?`;
+}
+
+function profileIdFromName(name) {
+  return name.trim().toLowerCase().replace(/\s+/g, '_');
+}
+
+function createStarterProfile(name, lang, details = {}) {
+  return {
+    name,
+    role: details.role || 'other',
+    age: details.age || null,
+    challenges: [],
+    strengths: [],
+    triggers: [],
+    whatWorks: [],
+    notes: details.notes || (lang === 'he'
+      ? 'הפרופיל נוצר מהשיחה. חסרים עדיין גיל, קשר משפחתי ומיקוד מרכזי.'
+      : 'Profile started from conversation. Age, relationship, and main focus are still missing.'),
+  };
+}
+
+function normalizeExtractedProfile(profile, lang) {
+  const name = cleanSubjectName(profile?.name || '');
+  if (!name) return null;
+
+  return {
+    name,
+    role: profile.role || 'other',
+    age: profile.age || null,
+    challenges: profile.challenges || [],
+    strengths: profile.strengths || [],
+    triggers: profile.triggers || [],
+    whatWorks: profile.whatWorks || [],
+    notes: profile.notes || (lang === 'he' ? 'הפרופיל נוצר מהשיחה.' : 'Profile started from conversation.'),
+  };
+}
+
+function extractProfilesFromText(text, lang) {
+  const results = [];
+  const seen = new Set();
+  const he = lang === 'he';
+  const source = text.trim();
+
+  const add = (name, details = {}) => {
+    const clean = cleanSubjectName(name);
+    if (!clean) return;
+    const id = profileIdFromName(clean);
+    if (seen.has(id)) return;
+    seen.add(id);
+    results.push(normalizeExtractedProfile({
+      name: clean,
+      role: details.role || 'other',
+      age: details.age || null,
+      notes: details.notes || (he ? 'הוזכר בשיחה ונוצר כפרופיל ראשוני.' : 'Mentioned in conversation and started as a profile.'),
+    }, lang));
+  };
+
+  const patterns = [
+    { re: /(?:בן|בת)\s+(\d{1,2})\s+(?:בשם|שקוראים לו|שקוראים לה)\s+([\p{Script=Hebrew}A-Za-z][\p{Script=Hebrew}A-Za-z'-]{1,20})/giu, role: 'child', ageFirst: true },
+    { re: /(?:בשם|קוראים לו|קוראים לה|שמו|שמה)\s+([\p{Script=Hebrew}A-Za-z][\p{Script=Hebrew}A-Za-z'-]{1,20})/giu, role: 'child' },
+    { re: /(?:הבן שלי|הבת שלי|הילד שלי|הילדה שלי|בני|בתי)\s+([\p{Script=Hebrew}A-Za-z][\p{Script=Hebrew}A-Za-z'-]{1,20})/giu, role: 'child' },
+    { re: /([\p{Script=Hebrew}A-Za-z][\p{Script=Hebrew}A-Za-z'-]{1,20})\s+(?:בן|בת)\s+(\d{1,2})/giu, role: 'child' },
+    { re: /([\p{Script=Hebrew}A-Za-z][\p{Script=Hebrew}A-Za-z'-]{1,20})\s+(?:אח שלו|אחותו|אחיו|אחותה)/giu, role: 'child' },
+    { re: /([\p{Script=Hebrew}A-Za-z][\p{Script=Hebrew}A-Za-z'-]{1,20})\s+(?:מציק|מציקה|צורח|צועק|בוכה|מתפרץ|רב|מסרב|מתנגד|זורק|מרביץ|דוחף|screams|yells|cries|refuses|hits|pushes|bothers)/giu, role: 'child' },
+  ];
+
+  for (const { re, role, ageFirst } of patterns) {
+    for (const match of source.matchAll(re)) {
+      const age = ageFirst ? match[1] : match[2];
+      const name = ageFirst ? match[2] : match[1];
+      add(name, { role, age: age && /^\d+$/.test(age) ? Number(age) : null });
+    }
+  }
+
+  const subject = extractProfileSubject(source);
+  if (subject) add(subject, { role: 'other' });
+
+  return results.filter(Boolean);
+}
+
+function inferProfileUpdatesFromMessage(text, lang) {
+  const updates = { challenges: [], triggers: [], notes: '' };
+  const he = lang === 'he';
+
+  if (/(מציק|אחים|אח שלו|אחותו|sibling|brother|sister|bother)/i.test(text)) {
+    updates.challenges.push(he ? 'קושי סביב אחים' : 'sibling friction');
+    updates.triggers.push(he ? 'אינטראקציה עם אחים' : 'sibling interaction');
+  }
+  if (/(מסך|כיבוי|טלפון|טלוויזיה|screen|phone|tv)/i.test(text)) {
+    updates.challenges.push(he ? 'קושי סביב מסכים' : 'screen-related difficulty');
+    updates.triggers.push(he ? 'כיבוי מסך' : 'screen shutdown');
+  }
+  if (/(פיצוץ|צעק|צרח|בכי|ריב|meltdown|scream|yell|cry)/i.test(text)) {
+    updates.challenges.push(he ? 'תגובות חזקות בזמן קושי' : 'strong reactions during difficulty');
+  }
+
+  return updates;
+}
+
+function mergeProfileUpdates(profile, updates) {
+  return {
+    ...profile,
+    challenges: [...new Set([...(profile.challenges || []), ...(updates.challenges || [])])].slice(0, 8),
+    triggers: [...new Set([...(profile.triggers || []), ...(updates.triggers || [])])].slice(0, 8),
+    notes: profile.notes || updates.notes || '',
+  };
 }
 
 function isProfileFragment(text) {
@@ -314,11 +421,34 @@ export default function App() {
 
     if (!route.synthesis) {
       const userMsg = { role: 'user', text: m };
-      const profileResponse = profileIntakeResponse(m, lang);
+      const contextualProfiles = extractProfilesFromText(m, lang);
+      const profileSubject = extractProfileSubject(m) || contextualProfiles[0]?.name || null;
+      const profileResponse = profileSubject && ['clarifying', 'fragment_intake'].includes(route.mode)
+        ? (lang === 'he'
+            ? `בשמחה, נדבר על ${profileSubject}. מה הכי חשוב לך שאבין עליו כרגע?`
+            : `Of course, let's talk about ${profileSubject}. What is most important for me to understand about them right now?`)
+        : null;
+      if (contextualProfiles.length > 0) {
+        const profileId = profileIdFromName(contextualProfiles[0].name);
+        setCaseData(prev => ({
+          ...prev,
+          activeProfileId: prev.activeProfileId || profileId,
+          profiles: mergeProfiles(prev.profiles || {}, contextualProfiles),
+        }));
+      }
       if (route.mode === 'simulation') setTab('sim');
       if (route.mode === 'event_intake') {
         setCaseData(prev => ({
           ...prev,
+          profiles: prev.activeProfileId && prev.profiles?.[prev.activeProfileId]
+            ? {
+                ...prev.profiles,
+                [prev.activeProfileId]: mergeProfileUpdates(
+                  prev.profiles[prev.activeProfileId],
+                  inferProfileUpdatesFromMessage(m, lang)
+                ),
+              }
+            : prev.profiles,
           pendingIntake: { text: m, missing: route.context.missing, date: new Date().toISOString() },
         }));
       }
@@ -335,6 +465,21 @@ export default function App() {
       setTyping(false);
       saveSession({ routeMode: route.mode, userMessage: m, advisorMessage: response, eventCreated: false });
       speakText(response);
+
+      if (contextualProfiles.length === 0 && !['greeting', 'simulation', 'continue_last_topic', 'correction'].includes(route.mode)) {
+        const profiles = await extractProfiles([...msgs, userMsg, { role: 'advisor', text: response }].slice(-6));
+        if (profiles.length > 0) {
+          setCaseData(prev => {
+            const merged = mergeProfiles(prev.profiles || {}, profiles);
+            const firstId = profiles[0]?.name ? profileIdFromName(profiles[0].name) : prev.activeProfileId;
+            return {
+              ...prev,
+              profiles: merged,
+              activeProfileId: prev.activeProfileId || firstId,
+            };
+          });
+        }
+      }
       return;
     }
 
@@ -418,10 +563,13 @@ Answer this current event specifically. Do not ask a generic "what is on your mi
     speakText(reply);
     saveSession({ routeMode: route.mode, userMessage: m, advisorMessage: reply, eventCreated: true, eventId: event.id, insightId: advisorInsight.id });
 
-    const profiles = await extractProfiles([...msgs, userMsg, { role: 'advisor', text: reply }].slice(-6));
+    const deterministicProfiles = extractProfilesFromText(m, lang);
+    const llmProfiles = await extractProfiles([...msgs, userMsg, { role: 'advisor', text: reply }].slice(-6));
+    const profiles = [...deterministicProfiles, ...llmProfiles];
     setCaseData(prev => ({
       ...prev,
       profiles: profiles.length > 0 ? mergeProfiles(prev.profiles, profiles) : prev.profiles,
+      activeProfileId: prev.activeProfileId || (profiles[0]?.name ? profileIdFromName(profiles[0].name) : prev.activeProfileId),
       insights: [...(prev.insights || []), advisorInsight],
     }));
   }, [caseData, msgs, typing, lang, isHe, mergeProfiles, state, speakText]);
