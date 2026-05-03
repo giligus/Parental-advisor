@@ -23,5 +23,15 @@ export default defineConfig({
       },
     }),
   ],
-  server: { host: true, port: 3000 },
+  server: {
+    host: true,
+    port: 3000,
+    proxy: {
+      // During local dev, forward /api/* to the Express server on port 3001
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+    },
+  },
 });
