@@ -35,10 +35,12 @@ export async function elevenLabsSpeak(text, voiceId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, voiceId }),
     });
-    if (!r.ok) return null;
     const data = await r.json();
+    if (!r.ok) return { error: data?.error || `TTS ${r.status}` };
     return data; // { audio_base64, alignment }
-  } catch { return null; }
+  } catch (error) {
+    return { error: error?.message || 'TTS request failed' };
+  }
 }
 
 // ── Web Speech API TTS (fallback) ─────────────────────

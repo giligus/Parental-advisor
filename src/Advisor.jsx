@@ -47,7 +47,8 @@ export default function Advisor({ persona, lang, onBack }) {
             () => { setSpeaking(false); setStatus(isHe ? 'מקשיב' : 'Listening'); inputRef.current?.focus(); }
           );
         } else {
-          // ElevenLabs failed, fall back to Web Speech
+          console.warn('ElevenLabs unavailable, using browser speech fallback:', data?.error || 'unknown TTS error');
+          setStatus(isHe ? 'קול דפדפן' : 'Browser voice');
           webSpeechSpeak(text, lang,
             () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
             () => { setSpeaking(false); setStatus(isHe ? 'מקשיב' : 'Listening'); inputRef.current?.focus(); }
