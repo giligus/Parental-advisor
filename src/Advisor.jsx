@@ -96,8 +96,12 @@ export default function Advisor({ persona, lang, onBack }) {
       setMsgs(p => [...p, { role: 'advisor', text: reply }]);
       setBusy(false);
       doSpeak(reply);
-    } catch {
-      const err = isHe ? 'מצטערת, הייתה בעיה. נסו שוב.' : 'Sorry, there was an issue. Please try again.';
+    } catch (error) {
+      console.error('Chat request failed:', error);
+      const detail = error?.message ? ` (${error.message})` : '';
+      const err = isHe
+        ? `מצטערת, הייתה בעיה בחיבור ליועץ.${detail}`
+        : `Sorry, there was an issue connecting to the advisor.${detail}`;
       setMsgs(p => [...p, { role: 'advisor', text: err, isErr: true }]);
       setBusy(false);
       setStatus(isHe ? 'מקשיב' : 'Listening');

@@ -11,6 +11,11 @@ const app = express();
 const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
 app.use(express.json({ limit: '2mb' }));
 
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+
 // ── Config from env ───────────────────────────────────
 const PROVIDER      = (process.env.LLM_PROVIDER || 'anthropic').toLowerCase();
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -143,7 +148,7 @@ if (isDev) {
   });
 }
 
-const PORT = process.env.PORT || (isDev ? 3000 : 3001);
+const PORT = process.env.PORT || (isDev ? 3010 : 3001);
 app.listen(PORT, () => {
   console.log(`[server] Listening on port ${PORT}${isDev ? ' (dev)' : ''}`);
   console.log(`[server] Provider: ${PROVIDER} | Model: ${PROVIDER === 'openai' ? OPENAI_MODEL : ANTHROPIC_MODEL}`);

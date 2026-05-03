@@ -7,6 +7,22 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      cleanupOutdatedCaches: true,
+      workbox: {
+        navigateFallbackDenylist: [/^\/api\//],
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+            handler: 'NetworkOnly',
+            method: 'GET',
+          },
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+            handler: 'NetworkOnly',
+            method: 'POST',
+          },
+        ],
+      },
       manifest: {
         name: 'Behavioral Advisor',
         short_name: 'Advisor',
@@ -25,13 +41,6 @@ export default defineConfig({
   ],
   server: {
     host: true,
-    port: 3000,
-    proxy: {
-      // During local dev, forward /api/* to the Express server on port 3001
-      '/api': {
-        target: 'http://localhost:3001',
-        changeOrigin: true,
-      },
-    },
+    port: 3010,
   },
 });
