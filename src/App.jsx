@@ -13,15 +13,57 @@ const EMPTY_CASE = { profiles: {}, events: [], insights: [], activeProfileId: nu
 function isNameOnly(text) {
   const trimmed = text.trim();
   const words = trimmed.split(/\s+/).filter(Boolean);
+  if (/^(על|about)\s+/i.test(trimmed)) return false;
   return words.length <= 2
     && trimmed.length >= 2
     && trimmed.length <= 24
     && !/[?!.]/.test(trimmed)
-    && !/(קרה|היום|אתמול|פיצוץ|מסך|בכי|צעק|ריב|בעיה|קשה|help|problem|screen|today|yesterday)/i.test(trimmed);
+    && !/(היי|שלום|אהלן|רציתי|רוצה|לדבר|לשוחח|קרה|היום|אתמול|פיצוץ|מסך|בכי|צעק|ריב|בעיה|קשה|help|problem|screen|today|yesterday|want|talk|about)/i.test(trimmed);
 }
 
 function isAssumptionCorrection(text) {
   return /(לא אמרתי|לא סיפרתי|איך אתה יודע|אתה מניח|אל תניח|i did not say|i didn't say|how do you know|you assumed)/i.test(text);
+}
+
+function cleanSubjectName(value = '') {
+  const cleaned = value
+    .replace(/[?.!,״"]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned || cleaned.length > 32) return null;
+  if (/(מציק|מסך|פיצוץ|ריב|בעיה|קשה|צעק|בכה|עשה|קרה|today|problem|screen|meltdown)/i.test(cleaned)) return null;
+  return cleaned;
+}
+
+function extractProfileSubject(text) {
+  const trimmed = text
+    .trim()
+    .replace(/^(שלום|היי|הי|אהלן|hi|hello)[,\s]+/i, '')
+    .trim();
+
+  const patterns = [
+    /^(?:אני\s+)?(?:רציתי|רוצה|אשמח|צריך|צריכה)\s+(?:לדבר|לשוחח)\s+על\s+(.+)$/i,
+    /^(?:בואי|בוא|אפשר)?\s*(?:לדבר|לשוחח)\s+על\s+(.+)$/i,
+    /^על\s+(.+)$/i,
+    /^(?:about)\s+(.+)$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+    if (match) return cleanSubjectName(match[1]);
+  }
+
+  return isNameOnly(trimmed) ? cleanSubjectName(trimmed) : null;
+}
+
+function profileIntakeResponse(userText, lang) {
+  const name = extractProfileSubject(userText);
+  if (!name) return null;
+
+  return lang === 'he'
+    ? `בשמחה, נדבר על ${name}. מי זה ${name} מבחינתך, ומה הדבר העיקרי שחשוב לך להבין או לשנות לגביו?`
+    : `Of course, let's talk about ${name}. Who is ${name} to you, and what is the main thing you want to understand or change?`;
 }
 
 function isProfileFragment(text) {
@@ -272,6 +314,7 @@ export default function App() {
 
     if (!route.synthesis) {
       const userMsg = { role: 'user', text: m };
+      const profileResponse = profileIntakeResponse(m, lang);
       if (route.mode === 'simulation') setTab('sim');
       if (route.mode === 'event_intake') {
         setCaseData(prev => ({
@@ -284,8 +327,10 @@ export default function App() {
       const history = buildConversationHistory([...msgs, userMsg]);
       const modelResponse = route.mode === 'simulation'
         ? null
+        : profileResponse
+          ? null
         : await getNaturalRoutedResponse({ lang, route, caseData, conversationHistory: history, userText: m });
-      const response = modelResponse || naturalRouterResponse(route, lang, m);
+      const response = profileResponse || modelResponse || naturalRouterResponse(route, lang, m);
       setMsgs(p => [...p, { role: 'advisor', text: response }]);
       setTyping(false);
       saveSession({ routeMode: route.mode, userMessage: m, advisorMessage: response, eventCreated: false });

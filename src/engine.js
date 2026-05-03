@@ -130,7 +130,7 @@ function isShortFragment(text) {
 
   return !hasAny(trimmed, [
     'today', 'yesterday', 'happened', 'meltdown', 'screaming', 'screen',
-    'היום', 'אתמול', 'קרה', 'פיצוץ', 'צרחות', 'צעק', 'בכי', 'מסך', 'ריב',
+    'היום', 'אתמול', 'קרה', 'פיצוץ', 'צרחות', 'צעק', 'בכי', 'מסך', 'ריב', 'מציק', 'אחים', 'מכה', 'דוחף',
   ]);
 }
 
@@ -174,7 +174,7 @@ export function detectConversationType(msg) {
   if (hasAny(text, ['תוכנית', 'מה לעשות', 'צעדים', 'איך להגיב', 'מה להגיד', 'plan', 'what should'])) return 'action_plan';
   if (hasAny(text, ['נמאס', 'לא מסוגל', 'שחוקים', 'מיואש', 'מתוסכל', 'קשה לי', 'exhausted', 'hopeless'])) return 'distress';
   if (isShortFragment(text)) return 'fragment';
-  if (hasAny(text, ['היום', 'אתמול', 'קרה', 'פיצוץ', 'צרחות', 'צעק', 'בכי', 'מסך', 'כיבוי', 'מעבר', 'ריב', 'meltdown', 'screaming', 'screen'])) return 'event';
+  if (hasAny(text, ['היום', 'אתמול', 'קרה', 'פיצוץ', 'צרחות', 'צעק', 'בכי', 'מסך', 'כיבוי', 'מעבר', 'ריב', 'מציק', 'אחים', 'מכה', 'דוחף', 'meltdown', 'screaming', 'screen', 'sibling', 'hit', 'push', 'bother'])) return 'event';
   return 'open';
 }
 
@@ -187,7 +187,7 @@ export function checkContextSufficiency(msg, conversationType) {
     return { enoughForEvent: false, enoughForSynthesis: true, missing: null };
   }
 
-  const hasTrigger = hasAny(msg, ['מסך', 'כיבוי', 'מעבר', 'טלפון', 'טלוויזיה', 'אייפד', 'screen', 'transition']);
+  const hasTrigger = hasAny(msg, ['מסך', 'כיבוי', 'מעבר', 'טלפון', 'טלוויזיה', 'אייפד', 'אחים', 'אח שלו', 'אחותו', 'מציק', 'screen', 'transition', 'sibling', 'brother', 'sister']);
   const hasReaction = hasAny(msg, ['פיצוץ', 'צרחות', 'צעק', 'בכי', 'סירב', 'השתולל', 'meltdown', 'screaming', 'refused']);
   const hasParentMove = hasAny(msg, ['אמרתי', 'אמרנו', 'הסבר', 'איימ', 'לקחתי', 'גבול', 'התראה', 'I said', 'we said', 'warning']);
 

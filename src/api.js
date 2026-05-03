@@ -143,14 +143,9 @@ Response guardrails:
 
 export async function getGreeting(lang) {
   const he = lang === 'he';
-  const system = he
-    ? 'אתה יועץ התנהגותי. פתח בברכה חמה בעברית טבעית. 2-3 משפטים. שאל בעדינות מה מעסיק אותם.'
-    : "You are a behavioral advisor. Open with a warm greeting. 2-3 sentences. Gently ask what's on their mind.";
-  const fallback = he
-    ? 'שלום, שמח שאתם פה. תרצו לספר מה קרה היום, או להמשיך מהנושא האחרון?'
-    : "Hi, glad you're here. Would you like to tell me what happened today, or continue from the last topic?";
-
-  return (await callAPI(system, [{ role: 'user', content: he ? 'שלום' : 'Hello' }])) || fallback;
+  return he
+    ? 'שלום, אני כאן איתכם. ספרו לי במה תרצו להתמקד היום, או מה קרה מאז הפעם הקודמת.'
+    : "Hi, I'm here with you. Tell me what you'd like to focus on today, or what happened since last time.";
 }
 
 export async function getAdvisorResponse(systemPrompt, conversationHistory) {
@@ -179,14 +174,14 @@ export async function getNaturalRoutedResponse({ lang, route, caseData, conversa
   ].filter(Boolean).join('\n');
 
   const modeGuideHe = {
-    greeting: 'זו ברכה בלבד. ענה קצר, חם ומזמין, ושאל במה נרצה להתמקד היום.',
-    continue_last_topic: 'המשתמש מבקש להמשיך מנושא קודם. אם אין מספיק הקשר, בקש תזכורת קצרה בלי להמציא היסטוריה.',
-    correction: 'המשתמש מתקן הנחה שלך. קבל את התיקון בקצרה, בלי להתגונן, והתחל נקי.',
-    fragment_intake: 'זו הודעה חלקית. אל תנתח. שאל שאלה אחת קצרה שתעזור להבין על מי או על מה מדובר.',
-    clarifying: 'זו פתיחה כללית. ענה אנושית ושאל שאלה אחת שמזמינה לספר מה קורה.',
-    empathic: 'יש מצוקה רגשית. קודם תן תיקוף רגשי, ואז שאל שאלה אחת עדינה.',
-    event_intake: `זה נראה כמו דיווח אירוע חלקי. אל תיצור ניתוח מלא. שאל שאלה אחת חסרה בהקשר. הפרט החסר: ${missing || 'הקשר האירוע'}.`,
-    action_plan: 'המשתמש מבקש כיוון או תוכנית. אם יש מספיק הקשר, תן צעד אחד-שניים; אם חסר הקשר, שאל שאלה אחת ממוקדת.',
+    greeting: 'זו ברכה בלבד. עני קצר, חם ומזמין, ושאלי במה נרצה להתמקד היום.',
+    continue_last_topic: 'המשתמש מבקש להמשיך מנושא קודם. אם אין מספיק הקשר, בקשי תזכורת קצרה בלי להמציא היסטוריה.',
+    correction: 'המשתמש מתקן הנחה שלך. קבלי את התיקון בקצרה, בלי להתגונן, והתחילי נקי.',
+    fragment_intake: 'זו הודעה חלקית. אל תנתחי ואל תנחשי. שאלי שאלה אחת קצרה שתעזור להבין על מי או על מה מדובר.',
+    clarifying: 'זו פתיחה כללית. עני אנושית ושאלי שאלה אחת שמזמינה לספר מה קורה. אל תנחשי את התוכן.',
+    empathic: 'יש מצוקה רגשית. קודם תני תיקוף רגשי, ואז שאלי שאלה אחת עדינה.',
+    event_intake: `זה נראה כמו דיווח אירוע חלקי. אל תצרי ניתוח מלא ואל תשלימי פרטים לבד. שאלי שאלה אחת חסרה בהקשר. אם מדובר בהצקות בין אחים, שאלי איך זה נראה בפועל ומה ההורים עושים כשזה מתחיל. הפרט החסר: ${missing || 'הקשר האירוע'}.`,
+    action_plan: 'המשתמש מבקש כיוון או תוכנית. אם יש מספיק הקשר, תני צעד אחד-שניים; אם חסר הקשר, שאלי שאלה אחת ממוקדת.',
   };
 
   const modeGuideEn = {
