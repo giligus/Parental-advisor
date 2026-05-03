@@ -83,6 +83,7 @@ async function callOpenAI({ system, messages, max_tokens }) {
         content: message.content,
       })),
       max_output_tokens: max_tokens,
+      temperature: 0.35,
     }),
   });
 

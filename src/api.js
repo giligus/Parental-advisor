@@ -106,7 +106,39 @@ ${he ? 'להימנע' : 'Avoid'}: ${policy?.avoid || ''}`
 childReg=${state.childReg}, parentReg=${state.parentReg}, conflict=${state.conflict}, trust=${state.trust}, risk=${state.risk}`
     : '';
 
-  return `${base}${profileText}${eventText}${stateText}${extra || ''}`;
+  const latestEvent = (caseData.events || []).slice(-1)[0];
+  const latestEventText = latestEvent
+    ? `\n\nLatest event, use this directly:
+raw="${latestEvent.raw || ''}"
+type=${latestEvent.type || 'general'}
+trigger=${latestEvent.trigger || 'unknown'}
+outcome=${latestEvent.outcome || 'neutral'}`
+    : '';
+
+  const playbookText = latestEvent?.type === 'screen' && latestEvent?.outcome === 'escalation'
+    ? `
+
+Screen transition playbook:
+- Interpret this as a transition difficulty plus power-struggle risk, not only a screen problem.
+- The objective is to de-escalate without giving up the boundary.
+- Avoid long explanations, threats, punishment escalation, and negotiation after the boundary.
+- Use clear and calm language, not harsh or blunt language.
+- Recommended script in Hebrew: "אני רואה שקשה לך לעצור. המסך נסגר עכשיו. אתה יכול לכבות לבד או שאני אכבה."
+- After calm returns, recommend a short repair conversation, not a long explanation during screaming.
+- In the response, include the pattern and one practical next step.`
+    : '';
+
+  const responseGuardrails = `
+
+Response guardrails:
+- If the latest user message reports an event, answer that event directly and use its concrete details.
+- Do not ask "what is on your mind" or "what happened?" after an event was already reported.
+- If one useful detail is missing, ask for that one detail in context.
+- Do not make the whole answer a question when a playbook applies.
+- Do not invent names, previous topics, history, or hidden facts.
+- Prefer a useful advisor response: recognition, pattern, objective, and one practical next sentence.`;
+
+  return `${base}${responseGuardrails}${profileText}${eventText}${stateText}${latestEventText}${playbookText}${extra || ''}`;
 }
 
 export async function getGreeting(lang) {

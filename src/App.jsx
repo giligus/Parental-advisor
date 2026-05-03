@@ -338,8 +338,15 @@ export default function App() {
     // Phase 2: Add progress context
     const progress = computeProgress(newCase.events);
     const progressHint = progress ? `\n${isHe ? 'מגמה' : 'Trend'}: ${progress.direction}` : '';
+    const eventHint = `\n\nCurrent event to answer directly:
+- Raw report: "${event.raw}"
+- Type: ${event.type}
+- Trigger: ${event.trigger || 'unknown'}
+- Outcome: ${event.outcome}
+
+Answer this current event specifically. Do not ask a generic "what is on your mind" question after an event was reported.`;
     
-    const sys = buildSystemPrompt(lang, newCase, newState, policy, profileHint + progressHint);
+    const sys = buildSystemPrompt(lang, newCase, newState, policy, profileHint + progressHint + eventHint);
     const history = buildConversationHistory([...msgs, userMsg]);
     const reply = await getAdvisorResponse(sys, history);
 

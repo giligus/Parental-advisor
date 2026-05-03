@@ -66,7 +66,7 @@ export function selectPolicy(state) {
     };
   }
 
-  if (state.conflict > 0.55) {
+  if (state.risk === 'medium' || state.conflict > 0.45) {
     return {
       obj: 'הורדת מתח בלי לוותר על גבול',
       strat: 'תיקוף קצר ואז גבול ברור',
@@ -194,7 +194,7 @@ export function checkContextSufficiency(msg, conversationType) {
   return {
     enoughForEvent: hasTrigger && hasReaction && hasParentMove,
     enoughForSynthesis: hasTrigger && hasReaction && hasParentMove,
-    missing: hasTrigger && hasReaction ? 'parent_response' : 'event_context',
+    missing: hasTrigger && hasReaction && hasParentMove ? null : hasTrigger && hasReaction ? 'parent_response' : 'event_context',
   };
 }
 
