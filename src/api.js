@@ -29,22 +29,12 @@ export async function callLLM(system, messages) {
 
 // ── ElevenLabs TTS ────────────────────────────────────
 export async function elevenLabsSpeak(text, voiceId) {
-  const key = import.meta.env.VITE_ELEVENLABS_API_KEY;
-  if (!key) return null;
-
   try {
-    const r = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'xi-api-key': key },
-        body: JSON.stringify({
-          text,
-          model_id: 'eleven_flash_v2_5',
-          voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.3 },
-        }),
-      }
-    );
+    const r = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voiceId }),
+    });
     if (!r.ok) return null;
     const data = await r.json();
     return data; // { audio_base64, alignment }

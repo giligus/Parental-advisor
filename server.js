@@ -20,6 +20,7 @@ app.use('/api', (_req, res, next) => {
 const PROVIDER      = (process.env.LLM_PROVIDER || 'anthropic').toLowerCase();
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
 const OPENAI_KEY    = process.env.OPENAI_API_KEY    || '';
+const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || '';
 
 // Model selection — can override via env
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
@@ -122,12 +123,54 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
+app.post('/api/tts', async (req, res) => {
+  const { text, voiceId } = req.body || {};
+  if (!ELEVENLABS_KEY) {
+    return res.status(503).json({ error: 'ELEVENLABS_API_KEY is not configured' });
+  }
+  if (!text || !voiceId) {
+    return res.status(400).json({ error: 'Missing text or voiceId' });
+  }
+
+  try {
+    const eleven = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'xi-api-key': ELEVENLABS_KEY,
+      },
+      body: JSON.stringify({
+        text,
+        model_id: 'eleven_flash_v2_5',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+          style: 0.3,
+        },
+      }),
+    });
+
+    const data = await eleven.json();
+    if (!eleven.ok) {
+      return res.status(eleven.status).json({
+        error: data?.detail?.message || data?.message || 'ElevenLabs API error',
+      });
+    }
+
+    return res.json(data);
+  } catch (err) {
+    console.error('[/api/tts] ElevenLabs error:', err.message);
+    return res.status(500).json({ error: 'ElevenLabs proxy failed' });
+  }
+});
+
 // ── /api/config — lets the client know which provider is active ──
 app.get('/api/config', (req, res) => {
   res.json({
     provider: PROVIDER,
     model: PROVIDER === 'openai' ? OPENAI_MODEL : ANTHROPIC_MODEL,
     hasKey: PROVIDER === 'openai' ? !!OPENAI_KEY : !!ANTHROPIC_KEY,
+    hasTtsKey: !!ELEVENLABS_KEY,
   });
 });
 
@@ -154,4 +197,5 @@ app.listen(PORT, () => {
   console.log(`[server] Provider: ${PROVIDER} | Model: ${PROVIDER === 'openai' ? OPENAI_MODEL : ANTHROPIC_MODEL}`);
   if (PROVIDER === 'openai' && !OPENAI_KEY)    console.warn('[server] ⚠ OPENAI_API_KEY not set');
   if (PROVIDER === 'anthropic' && !ANTHROPIC_KEY) console.warn('[server] ⚠ ANTHROPIC_API_KEY not set');
+  if (!ELEVENLABS_KEY) console.warn('[server] ELEVENLABS_API_KEY not set; using browser speech fallback');
 });

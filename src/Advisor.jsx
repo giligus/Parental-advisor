@@ -37,8 +37,7 @@ export default function Advisor({ persona, lang, onBack }) {
       return;
     }
 
-    const elevenKey = import.meta.env.VITE_ELEVENLABS_API_KEY;
-    if (elevenKey && persona) {
+    if (persona) {
       // Try ElevenLabs first
       const voiceId = isHe ? persona.voiceIdHe : persona.voiceId;
       elevenLabsSpeak(text, voiceId).then(data => {
