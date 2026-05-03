@@ -1,23 +1,30 @@
-// ── Anthropic LLM ────────────────────────────────────
+// ── LLM via server proxy ─────────────────────────────
 export async function callLLM(system, messages) {
-  const key = import.meta.env.VITE_ANTHROPIC_API_KEY;
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
+  const r = await fetch('/api/chat', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(key ? { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' } : {}),
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
       max_tokens: 600,
       system,
       messages,
     }),
   });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const d = await r.json();
-  if (d.error) throw new Error(d.error.message);
-  return d.content?.find(c => c.type === 'text')?.text || '';
+
+  let d = {};
+  try {
+    d = await r.json();
+  } catch {
+    d = {};
+  }
+
+  if (!r.ok) {
+    const detail = d?.error ? `: ${d.error}` : '';
+    throw new Error(`API ${r.status}${detail}`);
+  }
+
+  return d.text || '';
 }
 
 // ── ElevenLabs TTS ────────────────────────────────────

@@ -8,10 +8,8 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
 app.use(express.json({ limit: '2mb' }));
-
-// ── Serve built frontend ──────────────────────────────
-app.use(express.static(path.join(__dirname, 'dist')));
 
 // ── Config from env ───────────────────────────────────
 const PROVIDER      = (process.env.LLM_PROVIDER || 'anthropic').toLowerCase();
@@ -128,14 +126,26 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-// ── SPA fallback ──────────────────────────────────────
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
-});
+if (isDev) {
+  const { createServer } = await import('vite');
+  const vite = await createServer({
+    server: { middlewareMode: true },
+    appType: 'spa',
+  });
+  app.use(vite.middlewares);
+} else {
+  // ── Serve built frontend ──────────────────────────────
+  app.use(express.static(path.join(__dirname, 'dist')));
 
-const PORT = process.env.PORT || 3001;
+  // ── SPA fallback ──────────────────────────────────────
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+  });
+}
+
+const PORT = process.env.PORT || (isDev ? 3000 : 3001);
 app.listen(PORT, () => {
-  console.log(`[server] Listening on port ${PORT}`);
+  console.log(`[server] Listening on port ${PORT}${isDev ? ' (dev)' : ''}`);
   console.log(`[server] Provider: ${PROVIDER} | Model: ${PROVIDER === 'openai' ? OPENAI_MODEL : ANTHROPIC_MODEL}`);
   if (PROVIDER === 'openai' && !OPENAI_KEY)    console.warn('[server] ⚠ OPENAI_API_KEY not set');
   if (PROVIDER === 'anthropic' && !ANTHROPIC_KEY) console.warn('[server] ⚠ ANTHROPIC_API_KEY not set');
