@@ -8,7 +8,13 @@ import { saveCase, loadCase, clearCase, saveSession, getSessions, computeProgres
 import { isTTSSupported, initTTS, speak, stopSpeaking, isSpeaking as checkSpeaking, isSTTSupported, startListening, stopListening } from './voice';
 import AdvisorAvatar, { getExpression, AVATAR_CSS } from './AdvisorAvatar';
 
-const EMPTY_CASE = { profiles: {}, events: [], insights: [], activeProfileId: null, pendingIntake: null };
+const EMPTY_CASE = { profiles: {}, events: [], insights: [], activeProfileId: null, activeFocus: null, pendingIntake: null };
+
+const PERSON_NAME_SOURCE = "[\\u0590-\\u05FFA-Za-z][\\u0590-\\u05FFA-Za-z'\\-]{1,24}";
+
+function escapeRegExp(value = '') {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function isNameOnly(text) {
   const trimmed = text.trim();
@@ -33,8 +39,14 @@ function cleanSubjectName(value = '') {
 
   if (!cleaned || cleaned.length > 32) return null;
   if (/^(הוא|היא|אני|אנחנו|אתה|אתם|ילד|ילדה|בן|בת|הילד|הילדה|הבן|הבת|שלו|שלה|they|he|she|it)$/i.test(cleaned)) return null;
-  if (/(מציק|מסך|פיצוץ|ריב|בעיה|קשה|צעק|בכה|עשה|קרה|today|problem|screen|meltdown)/i.test(cleaned)) return null;
+  if (/(הצק|מציק|מסך|פיצוץ|ריב|בעיה|קשה|צעק|בכה|עשה|קרה|today|problem|screen|meltdown)/i.test(cleaned)) return null;
   return cleaned;
+}
+
+function extractPersonFromPossessive(value = '') {
+  const re = new RegExp(`(?:של|of|for)\\s+(${PERSON_NAME_SOURCE})`, 'iu');
+  const match = value.match(re);
+  return match ? cleanSubjectName(match[1]) : null;
 }
 
 function extractProfileSubject(text) {
@@ -52,7 +64,7 @@ function extractProfileSubject(text) {
 
   for (const pattern of patterns) {
     const match = trimmed.match(pattern);
-    if (match) return cleanSubjectName(match[1]);
+    if (match) return extractPersonFromPossessive(match[1]) || cleanSubjectName(match[1]);
   }
 
   return isNameOnly(trimmed) ? cleanSubjectName(trimmed) : null;
@@ -69,6 +81,47 @@ function profileIntakeResponse(userText, lang) {
 
 function profileIdFromName(name) {
   return name.trim().toLowerCase().replace(/\s+/g, '_');
+}
+
+function detectConversationConcern(text, lang) {
+  const concerns = [
+    {
+      id: 'sibling_teasing',
+      labelHe: 'הצקות בין אחים',
+      labelEn: 'sibling teasing or friction',
+      re: /(הצק|מציק|מציקה|אחים|אחיו|אחותו|brother|sister|sibling|teas|bother)/i,
+    },
+    {
+      id: 'screen_boundaries',
+      labelHe: 'מסכים ומעברים',
+      labelEn: 'screens and transitions',
+      re: /(מסך|מסכים|כיבוי|טלפון|טלוויזיה|screen|phone|tablet|tv)/i,
+    },
+    {
+      id: 'escalation',
+      labelHe: 'התפרצות או הסלמה',
+      labelEn: 'escalation or meltdown',
+      re: /(פיצוץ|התפרצות|צעק|צורח|בכה|בכי|ריב|meltdown|scream|yell|cry|fight)/i,
+    },
+    {
+      id: 'homework_routine',
+      labelHe: 'שיעורים ושגרה',
+      labelEn: 'homework or routine',
+      re: /(שיעורים|בית ספר|בוקר|שינה|homework|school|morning|bedtime|sleep)/i,
+    },
+  ];
+  const found = concerns.find(item => item.re.test(text));
+  if (!found) return null;
+  return { id: found.id, label: lang === 'he' ? found.labelHe : found.labelEn };
+}
+
+function findMentionedProfileId(profiles = {}, text = '') {
+  for (const [id, profile] of Object.entries(profiles || {})) {
+    if (!profile?.name) continue;
+    const re = new RegExp(`(^|\\s|[.,!?])${escapeRegExp(profile.name)}($|\\s|[.,!?])`, 'iu');
+    if (re.test(text)) return id;
+  }
+  return null;
 }
 
 function createStarterProfile(name, lang, details = {}) {
@@ -423,44 +476,76 @@ export default function App() {
       const userMsg = { role: 'user', text: m };
       const contextualProfiles = extractProfilesFromText(m, lang);
       const profileSubject = extractProfileSubject(m) || contextualProfiles[0]?.name || null;
-      const profileResponse = profileSubject && ['clarifying', 'fragment_intake'].includes(route.mode)
-        ? (lang === 'he'
-            ? `בשמחה, נדבר על ${profileSubject}. מה הכי חשוב לך שאבין עליו כרגע?`
-            : `Of course, let's talk about ${profileSubject}. What is most important for me to understand about them right now?`)
-        : null;
-      if (contextualProfiles.length > 0) {
-        const profileId = profileIdFromName(contextualProfiles[0].name);
-        setCaseData(prev => ({
-          ...prev,
-          activeProfileId: prev.activeProfileId || profileId,
-          profiles: mergeProfiles(prev.profiles || {}, contextualProfiles),
-        }));
+      const concern = detectConversationConcern(m, lang);
+      const mentionedProfileId = findMentionedProfileId(caseData.profiles || {}, m);
+      let nextCaseData = caseData;
+      let nextProfiles = caseData.profiles || {};
+      let nextActiveProfileId = mentionedProfileId || caseData.activeProfileId || null;
+      let caseChanged = false;
+
+      const profilesToMerge = [...contextualProfiles];
+      if (profileSubject && !profilesToMerge.some(profile => profile?.name === profileSubject)) {
+        profilesToMerge.push(createStarterProfile(profileSubject, lang));
+      }
+
+      if (profilesToMerge.length > 0) {
+        nextProfiles = mergeProfiles(nextProfiles, profilesToMerge);
+        nextActiveProfileId = mentionedProfileId || profileIdFromName(profileSubject || profilesToMerge[0].name);
+        nextCaseData = { ...nextCaseData, profiles: nextProfiles, activeProfileId: nextActiveProfileId };
+        caseChanged = true;
+      } else if (mentionedProfileId && mentionedProfileId !== caseData.activeProfileId) {
+        nextActiveProfileId = mentionedProfileId;
+        nextCaseData = { ...nextCaseData, activeProfileId: nextActiveProfileId };
+        caseChanged = true;
+      }
+
+      if (nextActiveProfileId && nextProfiles[nextActiveProfileId] && concern) {
+        nextProfiles = {
+          ...nextProfiles,
+          [nextActiveProfileId]: mergeProfileUpdates(
+            nextProfiles[nextActiveProfileId],
+            inferProfileUpdatesFromMessage(m, lang)
+          ),
+        };
+        nextCaseData = { ...nextCaseData, profiles: nextProfiles };
+        caseChanged = true;
+      }
+
+      if (concern || profileSubject) {
+        nextCaseData = {
+          ...nextCaseData,
+          activeFocus: {
+            id: concern?.id || 'profile_understanding',
+            label: concern?.label || profileSubject,
+            profileId: nextActiveProfileId,
+            sourceText: m,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+        caseChanged = true;
       }
       if (route.mode === 'simulation') setTab('sim');
       if (route.mode === 'event_intake') {
-        setCaseData(prev => ({
-          ...prev,
-          profiles: prev.activeProfileId && prev.profiles?.[prev.activeProfileId]
-            ? {
-                ...prev.profiles,
-                [prev.activeProfileId]: mergeProfileUpdates(
-                  prev.profiles[prev.activeProfileId],
-                  inferProfileUpdatesFromMessage(m, lang)
-                ),
-              }
-            : prev.profiles,
-          pendingIntake: { text: m, missing: route.context.missing, date: new Date().toISOString() },
-        }));
+        nextCaseData = {
+          ...nextCaseData,
+          pendingIntake: {
+            text: m,
+            missing: route.context.missing,
+            profileId: nextActiveProfileId,
+            focus: nextCaseData.activeFocus || null,
+            date: new Date().toISOString(),
+          },
+        };
+        caseChanged = true;
       }
+      if (caseChanged) setCaseData(nextCaseData);
       setMsgs(p => [...p, userMsg]);
       setTyping(true);
       const history = buildConversationHistory([...msgs, userMsg]);
       const modelResponse = route.mode === 'simulation'
         ? null
-        : profileResponse
-          ? null
-        : await getNaturalRoutedResponse({ lang, route, caseData, conversationHistory: history, userText: m });
-      const response = profileResponse || modelResponse || naturalRouterResponse(route, lang, m);
+        : await getNaturalRoutedResponse({ lang, route, caseData: nextCaseData, conversationHistory: history, userText: m });
+      const response = modelResponse || naturalRouterResponse(route, lang, m);
       setMsgs(p => [...p, { role: 'advisor', text: response }]);
       setTyping(false);
       saveSession({ routeMode: route.mode, userMessage: m, advisorMessage: response, eventCreated: false });

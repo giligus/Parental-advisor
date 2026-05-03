@@ -10,7 +10,7 @@ const provider = (process.env.LLM_PROVIDER || 'anthropic').toLowerCase();
 const anthropicUrl = 'https://api.anthropic.com/v1/messages';
 const openaiUrl = 'https://api.openai.com/v1/responses';
 const anthropicModel = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
-const openaiModel = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const openaiModel = process.env.OPENAI_MODEL || 'gpt-4o';
 const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
 
 app.use(express.json({ limit: '1mb' }));

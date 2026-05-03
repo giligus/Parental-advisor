@@ -177,10 +177,22 @@ export async function getNaturalRoutedResponse({ lang, route, caseData, conversa
   const he = lang === 'he';
   const profiles = Object.values(caseData?.profiles || {});
   const recentEvents = (caseData?.events || []).slice(-5);
+  const activeProfile = caseData?.activeProfileId ? caseData?.profiles?.[caseData.activeProfileId] : null;
+  const activeFocus = caseData?.activeFocus || null;
+  const pendingIntake = caseData?.pendingIntake || null;
   const routeMode = route?.mode || 'open';
   const missing = route?.context?.missing || null;
 
   const caseContext = [
+    activeProfile
+      ? `${he ? 'האדם שבמוקד כרגע' : 'Current active person'}: ${activeProfile.name || 'unknown'} (${activeProfile.role || 'other'}${activeProfile.age ? `, ${he ? 'גיל' : 'age'} ${activeProfile.age}` : ''})`
+      : '',
+    activeFocus
+      ? `${he ? 'המוקד הפעיל בשיחה' : 'Active conversation focus'}: ${activeFocus.label || activeFocus.id}${activeFocus.sourceText ? `; ${he ? 'נאמר על ידי המשתמש' : 'user phrasing'}: "${activeFocus.sourceText}"` : ''}`
+      : '',
+    pendingIntake
+      ? `${he ? 'קליטה פתוחה שצריך להשלים' : 'Open intake to complete'}: "${pendingIntake.text || ''}"${pendingIntake.missing ? `; ${he ? 'חסר' : 'missing'}: ${pendingIntake.missing}` : ''}`
+      : '',
     profiles.length
       ? `${he ? 'פרופילים ידועים' : 'Known profiles'}: ${profiles.map(profile => {
           const age = profile.age ? `, ${he ? 'גיל' : 'age'} ${profile.age}` : '';
@@ -191,6 +203,12 @@ export async function getNaturalRoutedResponse({ lang, route, caseData, conversa
       ? `${he ? 'אירועים אחרונים' : 'Recent events'}: ${recentEvents.map(event => `${event.date}: ${event.type}/${event.outcome} "${event.raw || ''}"`).join(' | ')}`
       : '',
   ].filter(Boolean).join('\n');
+
+  const continuityRule = activeFocus
+    ? (he
+        ? `\nכלל המשכיות חשוב: המשתמש כבר סימן נושא פעיל: "${activeFocus.label || activeFocus.id}". אל תחזרי לשאלה כללית כמו "על מה תרצה לדבר". המשיכי מאותו נושא ושאלי את הפרט הבא שחסר כדי לעזור.`
+        : `\nImportant continuity rule: the user already marked an active topic: "${activeFocus.label || activeFocus.id}". Do not return to a generic "what would you like to discuss" question. Continue that topic and ask for the next missing detail.`)
+    : '';
 
   const modeGuideHe = {
     greeting: 'זו ברכה בלבד. עני קצר, חם ומזמין, ושאלי במה נרצה להתמקד היום.',
@@ -223,6 +241,7 @@ export async function getNaturalRoutedResponse({ lang, route, caseData, conversa
 אם חסר מידע, שאלי שאלה אחת בלבד.
 
 הנחיית מצב פנימית: ${modeGuideHe[routeMode] || modeGuideHe.clarifying}
+${continuityRule}
 ${caseContext ? `\nהקשר תיק פנימי, לשימוש עדין בלבד:\n${caseContext}` : ''}`
     : `You are Maya, a continuous virtual behavioral advisor.
 Speak in natural, warm, calm, direct English, like a human advisor following a case over time.
@@ -232,6 +251,7 @@ Reply in 1 to 4 short sentences, no markdown and no headings.
 If information is missing, ask exactly one question.
 
 Internal response guide: ${modeGuideEn[routeMode] || modeGuideEn.clarifying}
+${continuityRule}
 ${caseContext ? `\nInternal case context, use gently:\n${caseContext}` : ''}`;
 
   const history = conversationHistory?.length
