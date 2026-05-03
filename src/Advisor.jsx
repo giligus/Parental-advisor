@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Waveform from './Waveform';
 import { callLLM, elevenLabsSpeak, webSpeechSpeak, stopSpeech, playAudioBase64, buildHistory } from './api';
+import { loadAdvisorCase, prepareAdvisorTurn, saveAdvisorCase } from './advisorBrain';
 
 export default function Advisor({ persona, lang, onBack }) {
   const [msgs, setMsgs] = useState([]);
@@ -9,6 +10,7 @@ export default function Advisor({ persona, lang, onBack }) {
   const [voiceOn, setVoiceOn] = useState(true);
   const [speaking, setSpeaking] = useState(false);
   const [status, setStatus] = useState(lang === 'he' ? 'מקשיב' : 'Listening');
+  const [caseData, setCaseData] = useState(() => loadAdvisorCase());
   const chatRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -92,7 +94,11 @@ export default function Advisor({ persona, lang, onBack }) {
     setBusy(true);
     setStatus(isHe ? 'חושב...' : 'Thinking...');
     try {
-      const reply = await callLLM(SYS, buildHistory(updated));
+      const turn = prepareAdvisorTurn({ message: m, caseData, lang, persona });
+      setCaseData(turn.caseData);
+      saveAdvisorCase(turn.caseData);
+
+      const reply = await callLLM(turn.system, buildHistory(updated));
       setMsgs(p => [...p, { role: 'advisor', text: reply }]);
       setBusy(false);
       doSpeak(reply);
@@ -106,7 +112,7 @@ export default function Advisor({ persona, lang, onBack }) {
       setBusy(false);
       setStatus(isHe ? 'מקשיב' : 'Listening');
     }
-  }, [input, msgs, busy, doSpeak, isHe]);
+  }, [input, msgs, busy, doSpeak, isHe, caseData, lang, persona]);
 
   const toggleVoice = () => {
     setVoiceOn(v => !v);

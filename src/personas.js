@@ -12,7 +12,7 @@ export const PERSONAS = [
     body: 'F',
     bg: 'radial-gradient(ellipse 120% 100% at 50% 0%, #0a2540 0%, #040d18 55%, #020810 100%)',
     voiceId: 'EXAVITQu4vr4xnSDxMaL',       // ElevenLabs: Bella (female)
-    voiceIdHe: 'XB0fDUnXU5powFXDhCwa',      // ElevenLabs: Charlotte
+    voiceIdHe: 'SvXrVFRevwCyCR1yYZSh',      // ElevenLabs: Charlotte
   },
   {
     id: 'male',
