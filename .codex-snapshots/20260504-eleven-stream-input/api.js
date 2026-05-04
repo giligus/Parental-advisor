@@ -1,8 +1,3 @@
-let currentAudio = null;
-let currentSource = null;
-let currentAudioContext = null;
-let currentStreamAbort = null;
-
 // ── LLM via server proxy ─────────────────────────────
 export async function callLLM(system, messages) {
   const r = await fetch('/api/chat', {
@@ -48,114 +43,6 @@ export async function elevenLabsSpeak(text, voiceId) {
   }
 }
 
-export async function playElevenLabsStreamInput(text, voiceId, onStart, onEnd) {
-  if (!supportsProgressiveAudio()) return false;
-
-  const controller = new AbortController();
-  currentStreamAbort?.abort();
-  currentStreamAbort = controller;
-
-  let objectUrl = '';
-  let ended = false;
-  let started = false;
-  const queue = [];
-
-  try {
-    const mediaSource = new MediaSource();
-    objectUrl = URL.createObjectURL(mediaSource);
-    const audio = new Audio(objectUrl);
-    currentAudio = audio;
-
-    const done = new Promise(resolve => {
-      audio.onended = () => {
-        cleanupStreamAudio(objectUrl);
-        onEnd?.();
-        resolve(true);
-      };
-      audio.onerror = () => {
-        cleanupStreamAudio(objectUrl);
-        onEnd?.();
-        resolve(false);
-      };
-    });
-
-    await new Promise((resolve, reject) => {
-      mediaSource.addEventListener('sourceopen', resolve, { once: true });
-      mediaSource.addEventListener('error', reject, { once: true });
-    });
-
-    const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
-    const appendNext = () => {
-      if (sourceBuffer.updating || !queue.length) return;
-      sourceBuffer.appendBuffer(queue.shift());
-    };
-
-    sourceBuffer.addEventListener('updateend', () => {
-      if (!started) {
-        started = true;
-        onStart?.();
-        audio.play().catch(error => {
-          console.warn('Stream audio play failed:', error);
-        });
-      }
-      appendNext();
-      if (ended && !sourceBuffer.updating && !queue.length && mediaSource.readyState === 'open') {
-        mediaSource.endOfStream();
-      }
-    });
-
-    const response = await fetch('/api/tts-stream-input', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, voiceId }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok || !response.body) {
-      cleanupStreamAudio(objectUrl);
-      return false;
-    }
-
-    const reader = response.body.getReader();
-    while (true) {
-      const { value, done: streamDone } = await reader.read();
-      if (streamDone) break;
-      if (value?.length) {
-        queue.push(value);
-        appendNext();
-      }
-    }
-
-    ended = true;
-    if (!sourceBuffer.updating && !queue.length && mediaSource.readyState === 'open') {
-      mediaSource.endOfStream();
-    }
-
-    return await done;
-  } catch (error) {
-    if (error?.name !== 'AbortError') console.warn('Streaming TTS failed:', error);
-    cleanupStreamAudio(objectUrl);
-    return false;
-  }
-}
-
-function supportsProgressiveAudio() {
-  return typeof window !== 'undefined' &&
-    typeof MediaSource !== 'undefined' &&
-    MediaSource.isTypeSupported?.('audio/mpeg');
-}
-
-function cleanupStreamAudio(objectUrl) {
-  if (currentAudio) {
-    currentAudio.pause();
-    currentAudio.removeAttribute('src');
-    currentAudio.load();
-    currentAudio = null;
-  }
-  if (objectUrl) URL.revokeObjectURL(objectUrl);
-  currentStreamAbort = null;
-}
-
 // ── Web Speech API TTS (fallback) ─────────────────────
 export function webSpeechSpeak(text, lang, onStart, onEnd) {
   if (!window.speechSynthesis) { onEnd?.(); return; }
@@ -186,14 +73,6 @@ export function webSpeechSpeak(text, lang, onStart, onEnd) {
 
 export function stopSpeech() {
   window.speechSynthesis?.cancel();
-  currentStreamAbort?.abort();
-  cleanupStreamAudio();
-  try {
-    currentSource?.stop();
-  } catch {}
-  currentSource = null;
-  currentAudioContext?.close();
-  currentAudioContext = null;
 }
 
 export async function transcribeAudioBlob(blob, lang) {
@@ -249,17 +128,9 @@ export async function playAudioBase64(base64, onStart, onEnd) {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const buffer = await ctx.decodeAudioData(bytes.buffer);
     const source = ctx.createBufferSource();
-    currentAudioContext?.close();
-    currentAudioContext = ctx;
-    currentSource = source;
     source.buffer = buffer;
     source.connect(ctx.destination);
-    source.onended = () => {
-      currentSource = null;
-      currentAudioContext = null;
-      onEnd?.();
-      ctx.close();
-    };
+    source.onended = () => { onEnd?.(); ctx.close(); };
     onStart?.();
     source.start(0);
     return source;

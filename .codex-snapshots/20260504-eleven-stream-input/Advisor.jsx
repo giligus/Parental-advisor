@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Waveform from './Waveform';
-import { callLLM, elevenLabsSpeak, webSpeechSpeak, stopSpeech, playAudioBase64, playElevenLabsStreamInput, buildHistory, getSpeechRecognition, isSpeechInputSupported, isRecordedSpeechSupported, transcribeAudioBlob } from './api';
+import { callLLM, elevenLabsSpeak, webSpeechSpeak, stopSpeech, playAudioBase64, buildHistory, getSpeechRecognition, isSpeechInputSupported, isRecordedSpeechSupported, transcribeAudioBlob } from './api';
 import { loadAdvisorCase, prepareAdvisorTurn, saveAdvisorCase } from './advisorBrain';
 
 function ProfileField({ label, items }) {
@@ -134,7 +134,6 @@ export default function Advisor({ persona, lang, onBack }) {
   const doSpeak = useCallback((text) => {
     const runId = speechRunRef.current + 1;
     speechRunRef.current = runId;
-    stopSpeech();
 
     if (!voiceOn) {
       // Animate without audio
@@ -151,9 +150,9 @@ export default function Advisor({ persona, lang, onBack }) {
       if (!speechChunks.length) return;
 
       setStatus(isHe ? 'מכינה קול...' : 'Preparing voice...');
-      const playChunkedFallback = async () => {
-        const requests = speechChunks.map(chunk => elevenLabsSpeak(chunk, voiceId));
+      const requests = speechChunks.map(chunk => elevenLabsSpeak(chunk, voiceId));
 
+      (async () => {
         for (let index = 0; index < speechChunks.length; index += 1) {
           if (speechRunRef.current !== runId) return;
           const data = await requests[index];
@@ -167,16 +166,7 @@ export default function Advisor({ persona, lang, onBack }) {
             return;
           }
         }
-      };
-
-      playElevenLabsStreamInput(
-        text,
-        voiceId,
-        () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
-        () => { setSpeaking(false); setStatus(isHe ? 'מקשיב' : 'Listening'); inputRef.current?.focus(); }
-      ).then(played => {
-        if (!played && speechRunRef.current === runId) playChunkedFallback();
-      });
+      })();
     } else {
       playBrowserSpeech(text, true);
     }
