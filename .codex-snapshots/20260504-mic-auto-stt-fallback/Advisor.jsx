@@ -80,8 +80,6 @@ export default function Advisor({ persona, lang, onBack }) {
   const micStreamRef = useRef(null);
   const chunksRef = useRef([]);
   const recordTimerRef = useRef(null);
-  const silenceWatchRef = useRef(null);
-  const micAudioContextRef = useRef(null);
   const speechRunRef = useRef(0);
 
   const isHe = lang === 'he';
@@ -269,12 +267,6 @@ export default function Advisor({ persona, lang, onBack }) {
       clearTimeout(recordTimerRef.current);
       recordTimerRef.current = null;
     }
-    if (silenceWatchRef.current) {
-      cancelAnimationFrame(silenceWatchRef.current);
-      silenceWatchRef.current = null;
-    }
-    micAudioContextRef.current?.close();
-    micAudioContextRef.current = null;
     micStreamRef.current?.getTracks().forEach(track => track.stop());
     micStreamRef.current = null;
   }, []);
@@ -355,65 +347,13 @@ export default function Advisor({ persona, lang, onBack }) {
       recorderRef.current = recorder;
       chunksRef.current = [];
 
-      const stopRecorder = () => {
-        if (recorder.state !== 'inactive') recorder.stop();
-      };
-
-      const startSilenceWatch = () => {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!AudioCtx) return;
-
-        const ctx = new AudioCtx();
-        const source = ctx.createMediaStreamSource(stream);
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 1024;
-        source.connect(analyser);
-        micAudioContextRef.current = ctx;
-
-        const data = new Uint8Array(analyser.fftSize);
-        const startedAt = performance.now();
-        let heardVoice = false;
-        let lastVoiceAt = startedAt;
-
-        const tick = () => {
-          analyser.getByteTimeDomainData(data);
-          let sum = 0;
-          for (let i = 0; i < data.length; i += 1) {
-            const centered = data[i] - 128;
-            sum += centered * centered;
-          }
-          const level = Math.sqrt(sum / data.length) / 128;
-          const now = performance.now();
-
-          if (level > 0.025) {
-            heardVoice = true;
-            lastVoiceAt = now;
-          }
-
-          if (heardVoice && now - lastVoiceAt > 1100 && now - startedAt > 1200) {
-            stopRecorder();
-            return;
-          }
-
-          if (!heardVoice && now - startedAt > 6500) {
-            stopRecorder();
-            return;
-          }
-
-          silenceWatchRef.current = requestAnimationFrame(tick);
-        };
-
-        tick();
-      };
-
       recorder.ondataavailable = event => {
         if (event.data?.size > 0) chunksRef.current.push(event.data);
       };
 
       recorder.onstart = () => {
         setListening(true);
-        setStatus(isHe ? 'מקליטה... דברו עכשיו' : 'Recording... speak now');
-        startSilenceWatch();
+        setStatus(isHe ? 'מקליטה... לחצו לעצירה' : 'Recording... tap to stop');
       };
 
       recorder.onerror = event => {
@@ -432,7 +372,7 @@ export default function Advisor({ persona, lang, onBack }) {
         setListening(false);
 
         if (blob.size < 1200) {
-          setStatus(isHe ? 'לא נקלט קול מהמיקרופון' : 'No mic audio detected');
+          setStatus(isHe ? 'לא נקלט קול ברור' : 'No clear audio');
           inputRef.current?.focus();
           return;
         }
@@ -445,14 +385,14 @@ export default function Advisor({ persona, lang, onBack }) {
           send(text);
         } else {
           console.warn('Speech-to-text failed:', data?.error || 'empty transcript');
-          setStatus(isHe ? `לא הצלחתי לתמלל${data?.error ? `: ${data.error}` : ''}` : `Could not transcribe${data?.error ? `: ${data.error}` : ''}`);
+          setStatus(isHe ? 'לא הצלחתי לתמלל' : 'Could not transcribe');
           inputRef.current?.focus();
         }
       };
 
       recorder.start();
       recordTimerRef.current = setTimeout(() => {
-        stopRecorder();
+        if (recorder.state !== 'inactive') recorder.stop();
       }, 30000);
     } catch (error) {
       console.warn('Could not access microphone:', error);

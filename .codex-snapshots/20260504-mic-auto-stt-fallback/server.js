@@ -26,7 +26,6 @@ const ELEVENLABS_MODEL_HE = process.env.ELEVENLABS_MODEL_HE || 'eleven_v3';
 const ELEVENLABS_STT_MODEL = process.env.ELEVENLABS_STT_MODEL || 'scribe_v2';
 const ELEVENLABS_OUTPUT_FORMAT = process.env.ELEVENLABS_OUTPUT_FORMAT || 'mp3_22050_32';
 const ELEVENLABS_STREAM_OUTPUT_FORMAT = process.env.ELEVENLABS_STREAM_OUTPUT_FORMAT || 'pcm_16000';
-const OPENAI_STT_MODEL = process.env.OPENAI_STT_MODEL || 'gpt-4o-mini-transcribe';
 
 // Model selection — can override via env
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
@@ -254,71 +253,6 @@ function shouldFlushTts(text = '', isFirst = false) {
   return /[.!?…:;؟]$/.test(trimmed) ||
     trimmed.length >= (isFirst ? 28 : 48) ||
     wordCount >= (isFirst ? 4 : 7);
-}
-
-function audioExtension(mimeType = '') {
-  if (mimeType.includes('mp4')) return 'mp4';
-  if (mimeType.includes('mpeg') || mimeType.includes('mp3')) return 'mp3';
-  if (mimeType.includes('wav')) return 'wav';
-  if (mimeType.includes('m4a')) return 'm4a';
-  return 'webm';
-}
-
-async function transcribeWithElevenLabs(audio, mimeType, lang) {
-  if (!ELEVENLABS_KEY) throw new Error('ELEVENLABS_API_KEY is not configured');
-
-  const form = new FormData();
-  form.append('model_id', ELEVENLABS_STT_MODEL);
-  form.append('language_code', lang === 'he' ? 'he' : 'en');
-  form.append('timestamps_granularity', 'none');
-  form.append('tag_audio_events', 'false');
-  form.append('file', new Blob([audio], { type: mimeType }), `speech.${audioExtension(mimeType)}`);
-
-  const response = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
-    method: 'POST',
-    headers: { 'xi-api-key': ELEVENLABS_KEY },
-    body: form,
-  });
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.detail?.message || data?.message || `ElevenLabs STT HTTP ${response.status}`);
-  }
-
-  return {
-    text: data?.text || '',
-    languageCode: data?.language_code || null,
-    model: ELEVENLABS_STT_MODEL,
-    provider: 'elevenlabs',
-  };
-}
-
-async function transcribeWithOpenAI(audio, mimeType, lang) {
-  if (!OPENAI_KEY) throw new Error('OPENAI_API_KEY is not configured');
-
-  const form = new FormData();
-  form.append('model', OPENAI_STT_MODEL);
-  form.append('language', lang === 'he' ? 'he' : 'en');
-  form.append('response_format', 'json');
-  form.append('file', new Blob([audio], { type: mimeType }), `speech.${audioExtension(mimeType)}`);
-
-  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${OPENAI_KEY}` },
-    body: form,
-  });
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.error?.message || `OpenAI STT HTTP ${response.status}`);
-  }
-
-  return {
-    text: data?.text || '',
-    languageCode: lang === 'he' ? 'he' : 'en',
-    model: OPENAI_STT_MODEL,
-    provider: 'openai',
-  };
 }
 
 // ── Anthropic call ────────────────────────────────────
@@ -669,8 +603,8 @@ app.post('/api/tts-stream-input', async (req, res) => {
 
 app.post('/api/stt', async (req, res) => {
   const { audioBase64, mimeType = 'audio/webm', lang } = req.body || {};
-  if (!ELEVENLABS_KEY && !OPENAI_KEY) {
-    return res.status(503).json({ error: 'No speech-to-text provider is configured' });
+  if (!ELEVENLABS_KEY) {
+    return res.status(503).json({ error: 'ELEVENLABS_API_KEY is not configured' });
   }
   if (!audioBase64) {
     return res.status(400).json({ error: 'Missing audio' });
@@ -678,34 +612,39 @@ app.post('/api/stt', async (req, res) => {
 
   try {
     const audio = Buffer.from(audioBase64, 'base64');
-    if (audio.length < 500) {
+    if (audio.length < 800) {
       return res.status(400).json({ error: 'Audio is too short' });
     }
 
-    const errors = [];
-    if (ELEVENLABS_KEY) {
-      try {
-        const result = await transcribeWithElevenLabs(audio, mimeType, lang);
-        return res.json(result);
-      } catch (error) {
-        errors.push(`ElevenLabs: ${error.message}`);
-        console.warn('[/api/stt] ElevenLabs failed, trying fallback:', error.message);
-      }
+    const form = new FormData();
+    form.append('model_id', ELEVENLABS_STT_MODEL);
+    form.append('language_code', lang === 'he' ? 'he' : 'en');
+    form.append('timestamps_granularity', 'none');
+    form.append('tag_audio_events', 'false');
+    form.append('file', new Blob([audio], { type: mimeType }), `speech.${mimeType.includes('mp4') ? 'mp4' : 'webm'}`);
+
+    const eleven = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+      method: 'POST',
+      headers: { 'xi-api-key': ELEVENLABS_KEY },
+      body: form,
+    });
+
+    const data = await eleven.json();
+    if (!eleven.ok) {
+      return res.status(eleven.status).json({
+        error: data?.detail?.message || data?.message || 'ElevenLabs speech-to-text error',
+        model: ELEVENLABS_STT_MODEL,
+      });
     }
 
-    if (OPENAI_KEY) {
-      try {
-        const result = await transcribeWithOpenAI(audio, mimeType, lang);
-        return res.json({ ...result, fallbackFrom: errors.length ? 'elevenlabs' : null });
-      } catch (error) {
-        errors.push(`OpenAI: ${error.message}`);
-      }
-    }
-
-    return res.status(502).json({ error: errors.join(' | ') || 'Speech-to-text failed' });
+    return res.json({
+      text: data?.text || '',
+      languageCode: data?.language_code || null,
+      model: ELEVENLABS_STT_MODEL,
+    });
   } catch (err) {
-    console.error('[/api/stt] error:', err.message);
-    return res.status(500).json({ error: err.message || 'Speech-to-text proxy failed' });
+    console.error('[/api/stt] ElevenLabs error:', err.message);
+    return res.status(500).json({ error: 'Speech-to-text proxy failed' });
   }
 });
 
