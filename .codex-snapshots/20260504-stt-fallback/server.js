@@ -9,7 +9,7 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '2mb' }));
 
 app.use('/api', (_req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
@@ -23,8 +23,6 @@ const OPENAI_KEY    = process.env.OPENAI_API_KEY    || '';
 const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || '';
 const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_flash_v2_5';
 const ELEVENLABS_MODEL_HE = process.env.ELEVENLABS_MODEL_HE || 'eleven_v3';
-const ELEVENLABS_STT_MODEL = process.env.ELEVENLABS_STT_MODEL || 'scribe_v2';
-const ELEVENLABS_OUTPUT_FORMAT = process.env.ELEVENLABS_OUTPUT_FORMAT || 'mp3_22050_32';
 
 // Model selection — can override via env
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
@@ -144,7 +142,7 @@ app.post('/api/tts', async (req, res) => {
     const isHebrew = looksHebrew(text);
     const modelId = isHebrew ? ELEVENLABS_MODEL_HE : ELEVENLABS_MODEL;
     const languageCode = isHebrew ? 'he' : 'en';
-    const eleven = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=${encodeURIComponent(ELEVENLABS_OUTPUT_FORMAT)}`, {
+    const eleven = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -188,53 +186,6 @@ app.post('/api/tts', async (req, res) => {
   }
 });
 
-app.post('/api/stt', async (req, res) => {
-  const { audioBase64, mimeType = 'audio/webm', lang } = req.body || {};
-  if (!ELEVENLABS_KEY) {
-    return res.status(503).json({ error: 'ELEVENLABS_API_KEY is not configured' });
-  }
-  if (!audioBase64) {
-    return res.status(400).json({ error: 'Missing audio' });
-  }
-
-  try {
-    const audio = Buffer.from(audioBase64, 'base64');
-    if (audio.length < 800) {
-      return res.status(400).json({ error: 'Audio is too short' });
-    }
-
-    const form = new FormData();
-    form.append('model_id', ELEVENLABS_STT_MODEL);
-    form.append('language_code', lang === 'he' ? 'he' : 'en');
-    form.append('timestamps_granularity', 'none');
-    form.append('tag_audio_events', 'false');
-    form.append('file', new Blob([audio], { type: mimeType }), `speech.${mimeType.includes('mp4') ? 'mp4' : 'webm'}`);
-
-    const eleven = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
-      method: 'POST',
-      headers: { 'xi-api-key': ELEVENLABS_KEY },
-      body: form,
-    });
-
-    const data = await eleven.json();
-    if (!eleven.ok) {
-      return res.status(eleven.status).json({
-        error: data?.detail?.message || data?.message || 'ElevenLabs speech-to-text error',
-        model: ELEVENLABS_STT_MODEL,
-      });
-    }
-
-    return res.json({
-      text: data?.text || '',
-      languageCode: data?.language_code || null,
-      model: ELEVENLABS_STT_MODEL,
-    });
-  } catch (err) {
-    console.error('[/api/stt] ElevenLabs error:', err.message);
-    return res.status(500).json({ error: 'Speech-to-text proxy failed' });
-  }
-});
-
 // ── /api/config — lets the client know which provider is active ──
 app.get('/api/config', (req, res) => {
   res.json({
@@ -244,8 +195,6 @@ app.get('/api/config', (req, res) => {
     hasTtsKey: !!ELEVENLABS_KEY,
     ttsModel: ELEVENLABS_MODEL,
     ttsModelHe: ELEVENLABS_MODEL_HE,
-    sttModel: ELEVENLABS_STT_MODEL,
-    ttsOutputFormat: ELEVENLABS_OUTPUT_FORMAT,
   });
 });
 

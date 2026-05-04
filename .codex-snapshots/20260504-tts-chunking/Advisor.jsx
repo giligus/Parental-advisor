@@ -22,47 +22,6 @@ function ProfileField({ label, items }) {
   );
 }
 
-function splitSpeechChunks(text) {
-  const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!cleaned) return [];
-  if (cleaned.length <= 120) return [cleaned];
-
-  const sentences = cleaned.match(/[^.!?…]+[.!?…]?/g)?.map(item => item.trim()).filter(Boolean) || [cleaned];
-  const chunks = [];
-  let current = '';
-
-  for (const sentence of sentences) {
-    if (!current) {
-      current = sentence;
-    } else if (`${current} ${sentence}`.length <= 190) {
-      current = `${current} ${sentence}`;
-    } else {
-      chunks.push(current);
-      current = sentence;
-    }
-  }
-  if (current) chunks.push(current);
-
-  return chunks.flatMap(chunk => splitLongChunk(chunk, 210)).slice(0, 4);
-}
-
-function splitLongChunk(text, maxLength) {
-  if (text.length <= maxLength) return [text];
-  const words = text.split(' ');
-  const chunks = [];
-  let current = '';
-  for (const word of words) {
-    if (!current) current = word;
-    else if (`${current} ${word}`.length <= maxLength) current = `${current} ${word}`;
-    else {
-      chunks.push(current);
-      current = word;
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks;
-}
-
 export default function Advisor({ persona, lang, onBack }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState('');
@@ -80,7 +39,6 @@ export default function Advisor({ persona, lang, onBack }) {
   const micStreamRef = useRef(null);
   const chunksRef = useRef([]);
   const recordTimerRef = useRef(null);
-  const speechRunRef = useRef(0);
 
   const isHe = lang === 'he';
   const ac = persona?.accent || '#4b9cf3';
@@ -97,44 +55,8 @@ export default function Advisor({ persona, lang, onBack }) {
         : 'Expert behavioral advisor. Natural warm English. Default to 1-2 short sentences. No markdown.');
   const greetingSystem = `${SYS}\nDefault to 1-2 short sentences. ${isHe ? 'Reply in Hebrew.' : ''}`;
 
-  const playBrowserSpeech = useCallback((text, final = true) => new Promise(resolve => {
-    webSpeechSpeak(text, lang,
-      () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
-      () => {
-        if (final) {
-          setSpeaking(false);
-          setStatus(isHe ? 'מקשיב' : 'Listening');
-          inputRef.current?.focus();
-        }
-        resolve();
-      }
-    );
-  }), [isHe, lang]);
-
-  const playElevenLabsChunk = useCallback((data, final = true) => new Promise(resolve => {
-    if (!data?.audio_base64) {
-      resolve(false);
-      return;
-    }
-
-    playAudioBase64(data.audio_base64,
-      () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
-      () => {
-        if (final) {
-          setSpeaking(false);
-          setStatus(isHe ? 'מקשיב' : 'Listening');
-          inputRef.current?.focus();
-        }
-        resolve(true);
-      }
-    );
-  }), [isHe]);
-
-  // Speak a text response using low-latency chunked ElevenLabs or Web Speech fallback
+  // Speak a text response using ElevenLabs or Web Speech fallback
   const doSpeak = useCallback((text) => {
-    const runId = speechRunRef.current + 1;
-    speechRunRef.current = runId;
-
     if (!voiceOn) {
       // Animate without audio
       setSpeaking(true);
@@ -145,32 +67,30 @@ export default function Advisor({ persona, lang, onBack }) {
     }
 
     if (persona) {
+      // Try ElevenLabs first
       const voiceId = isHe ? persona.voiceIdHe : persona.voiceId;
-      const speechChunks = splitSpeechChunks(text);
-      if (!speechChunks.length) return;
-
-      setStatus(isHe ? 'מכינה קול...' : 'Preparing voice...');
-      const requests = speechChunks.map(chunk => elevenLabsSpeak(chunk, voiceId));
-
-      (async () => {
-        for (let index = 0; index < speechChunks.length; index += 1) {
-          if (speechRunRef.current !== runId) return;
-          const data = await requests[index];
-          if (speechRunRef.current !== runId) return;
-          const final = index === speechChunks.length - 1;
-          const played = await playElevenLabsChunk(data, final);
-          if (!played) {
-            console.warn('ElevenLabs unavailable, using browser speech fallback:', data?.error || 'unknown TTS error');
-            setStatus(isHe ? 'קול דפדפן' : 'Browser voice');
-            await playBrowserSpeech(speechChunks.slice(index).join(' '), true);
-            return;
-          }
+      elevenLabsSpeak(text, voiceId).then(data => {
+        if (data?.audio_base64) {
+          playAudioBase64(data.audio_base64,
+            () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
+            () => { setSpeaking(false); setStatus(isHe ? 'מקשיב' : 'Listening'); inputRef.current?.focus(); }
+          );
+        } else {
+          console.warn('ElevenLabs unavailable, using browser speech fallback:', data?.error || 'unknown TTS error');
+          setStatus(isHe ? 'קול דפדפן' : 'Browser voice');
+          webSpeechSpeak(text, lang,
+            () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
+            () => { setSpeaking(false); setStatus(isHe ? 'מקשיב' : 'Listening'); inputRef.current?.focus(); }
+          );
         }
-      })();
+      });
     } else {
-      playBrowserSpeech(text, true);
+      webSpeechSpeak(text, lang,
+        () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
+        () => { setSpeaking(false); setStatus(isHe ? 'מקשיב' : 'Listening'); inputRef.current?.focus(); }
+      );
     }
-  }, [voiceOn, persona, isHe, playBrowserSpeech, playElevenLabsChunk]);
+  }, [voiceOn, persona, lang, isHe]);
 
   // Greeting
   useEffect(() => {
@@ -382,12 +302,7 @@ export default function Advisor({ persona, lang, onBack }) {
 
   const toggleVoice = () => {
     setVoiceOn(v => !v);
-    if (voiceOn) {
-      speechRunRef.current += 1;
-      stopSpeech();
-      setSpeaking(false);
-      setStatus(isHe ? 'מקשיב' : 'Listening');
-    }
+    if (voiceOn) stopSpeech();
   };
 
   const QUICK = isHe

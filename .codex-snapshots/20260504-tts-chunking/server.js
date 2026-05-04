@@ -24,7 +24,6 @@ const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || '';
 const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_flash_v2_5';
 const ELEVENLABS_MODEL_HE = process.env.ELEVENLABS_MODEL_HE || 'eleven_v3';
 const ELEVENLABS_STT_MODEL = process.env.ELEVENLABS_STT_MODEL || 'scribe_v2';
-const ELEVENLABS_OUTPUT_FORMAT = process.env.ELEVENLABS_OUTPUT_FORMAT || 'mp3_22050_32';
 
 // Model selection — can override via env
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
@@ -144,7 +143,7 @@ app.post('/api/tts', async (req, res) => {
     const isHebrew = looksHebrew(text);
     const modelId = isHebrew ? ELEVENLABS_MODEL_HE : ELEVENLABS_MODEL;
     const languageCode = isHebrew ? 'he' : 'en';
-    const eleven = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=${encodeURIComponent(ELEVENLABS_OUTPUT_FORMAT)}`, {
+    const eleven = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -245,7 +244,6 @@ app.get('/api/config', (req, res) => {
     ttsModel: ELEVENLABS_MODEL,
     ttsModelHe: ELEVENLABS_MODEL_HE,
     sttModel: ELEVENLABS_STT_MODEL,
-    ttsOutputFormat: ELEVENLABS_OUTPUT_FORMAT,
   });
 });
 

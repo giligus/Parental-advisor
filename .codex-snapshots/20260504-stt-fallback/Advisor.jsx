@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Waveform from './Waveform';
-import { callLLM, elevenLabsSpeak, webSpeechSpeak, stopSpeech, playAudioBase64, buildHistory, getSpeechRecognition, isSpeechInputSupported, isRecordedSpeechSupported, transcribeAudioBlob } from './api';
+import { callLLM, elevenLabsSpeak, webSpeechSpeak, stopSpeech, playAudioBase64, buildHistory, getSpeechRecognition, isSpeechInputSupported } from './api';
 import { loadAdvisorCase, prepareAdvisorTurn, saveAdvisorCase } from './advisorBrain';
 
 function ProfileField({ label, items }) {
@@ -22,47 +22,6 @@ function ProfileField({ label, items }) {
   );
 }
 
-function splitSpeechChunks(text) {
-  const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!cleaned) return [];
-  if (cleaned.length <= 120) return [cleaned];
-
-  const sentences = cleaned.match(/[^.!?…]+[.!?…]?/g)?.map(item => item.trim()).filter(Boolean) || [cleaned];
-  const chunks = [];
-  let current = '';
-
-  for (const sentence of sentences) {
-    if (!current) {
-      current = sentence;
-    } else if (`${current} ${sentence}`.length <= 190) {
-      current = `${current} ${sentence}`;
-    } else {
-      chunks.push(current);
-      current = sentence;
-    }
-  }
-  if (current) chunks.push(current);
-
-  return chunks.flatMap(chunk => splitLongChunk(chunk, 210)).slice(0, 4);
-}
-
-function splitLongChunk(text, maxLength) {
-  if (text.length <= maxLength) return [text];
-  const words = text.split(' ');
-  const chunks = [];
-  let current = '';
-  for (const word of words) {
-    if (!current) current = word;
-    else if (`${current} ${word}`.length <= maxLength) current = `${current} ${word}`;
-    else {
-      chunks.push(current);
-      current = word;
-    }
-  }
-  if (current) chunks.push(current);
-  return chunks;
-}
-
 export default function Advisor({ persona, lang, onBack }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState('');
@@ -76,11 +35,6 @@ export default function Advisor({ persona, lang, onBack }) {
   const chatRef = useRef(null);
   const inputRef = useRef(null);
   const recognitionRef = useRef(null);
-  const recorderRef = useRef(null);
-  const micStreamRef = useRef(null);
-  const chunksRef = useRef([]);
-  const recordTimerRef = useRef(null);
-  const speechRunRef = useRef(0);
 
   const isHe = lang === 'he';
   const ac = persona?.accent || '#4b9cf3';
@@ -97,44 +51,8 @@ export default function Advisor({ persona, lang, onBack }) {
         : 'Expert behavioral advisor. Natural warm English. Default to 1-2 short sentences. No markdown.');
   const greetingSystem = `${SYS}\nDefault to 1-2 short sentences. ${isHe ? 'Reply in Hebrew.' : ''}`;
 
-  const playBrowserSpeech = useCallback((text, final = true) => new Promise(resolve => {
-    webSpeechSpeak(text, lang,
-      () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
-      () => {
-        if (final) {
-          setSpeaking(false);
-          setStatus(isHe ? 'מקשיב' : 'Listening');
-          inputRef.current?.focus();
-        }
-        resolve();
-      }
-    );
-  }), [isHe, lang]);
-
-  const playElevenLabsChunk = useCallback((data, final = true) => new Promise(resolve => {
-    if (!data?.audio_base64) {
-      resolve(false);
-      return;
-    }
-
-    playAudioBase64(data.audio_base64,
-      () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
-      () => {
-        if (final) {
-          setSpeaking(false);
-          setStatus(isHe ? 'מקשיב' : 'Listening');
-          inputRef.current?.focus();
-        }
-        resolve(true);
-      }
-    );
-  }), [isHe]);
-
-  // Speak a text response using low-latency chunked ElevenLabs or Web Speech fallback
+  // Speak a text response using ElevenLabs or Web Speech fallback
   const doSpeak = useCallback((text) => {
-    const runId = speechRunRef.current + 1;
-    speechRunRef.current = runId;
-
     if (!voiceOn) {
       // Animate without audio
       setSpeaking(true);
@@ -145,32 +63,30 @@ export default function Advisor({ persona, lang, onBack }) {
     }
 
     if (persona) {
+      // Try ElevenLabs first
       const voiceId = isHe ? persona.voiceIdHe : persona.voiceId;
-      const speechChunks = splitSpeechChunks(text);
-      if (!speechChunks.length) return;
-
-      setStatus(isHe ? 'מכינה קול...' : 'Preparing voice...');
-      const requests = speechChunks.map(chunk => elevenLabsSpeak(chunk, voiceId));
-
-      (async () => {
-        for (let index = 0; index < speechChunks.length; index += 1) {
-          if (speechRunRef.current !== runId) return;
-          const data = await requests[index];
-          if (speechRunRef.current !== runId) return;
-          const final = index === speechChunks.length - 1;
-          const played = await playElevenLabsChunk(data, final);
-          if (!played) {
-            console.warn('ElevenLabs unavailable, using browser speech fallback:', data?.error || 'unknown TTS error');
-            setStatus(isHe ? 'קול דפדפן' : 'Browser voice');
-            await playBrowserSpeech(speechChunks.slice(index).join(' '), true);
-            return;
-          }
+      elevenLabsSpeak(text, voiceId).then(data => {
+        if (data?.audio_base64) {
+          playAudioBase64(data.audio_base64,
+            () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
+            () => { setSpeaking(false); setStatus(isHe ? 'מקשיב' : 'Listening'); inputRef.current?.focus(); }
+          );
+        } else {
+          console.warn('ElevenLabs unavailable, using browser speech fallback:', data?.error || 'unknown TTS error');
+          setStatus(isHe ? 'קול דפדפן' : 'Browser voice');
+          webSpeechSpeak(text, lang,
+            () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
+            () => { setSpeaking(false); setStatus(isHe ? 'מקשיב' : 'Listening'); inputRef.current?.focus(); }
+          );
         }
-      })();
+      });
     } else {
-      playBrowserSpeech(text, true);
+      webSpeechSpeak(text, lang,
+        () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
+        () => { setSpeaking(false); setStatus(isHe ? 'מקשיב' : 'Listening'); inputRef.current?.focus(); }
+      );
     }
-  }, [voiceOn, persona, isHe, playBrowserSpeech, playElevenLabsChunk]);
+  }, [voiceOn, persona, lang, isHe]);
 
   // Greeting
   useEffect(() => {
@@ -223,34 +139,27 @@ export default function Advisor({ persona, lang, onBack }) {
     }
   }, [input, msgs, busy, doSpeak, isHe, caseData, lang, persona]);
 
-  const cleanupRecording = useCallback(() => {
-    if (recordTimerRef.current) {
-      clearTimeout(recordTimerRef.current);
-      recordTimerRef.current = null;
-    }
-    micStreamRef.current?.getTracks().forEach(track => track.stop());
-    micStreamRef.current = null;
-  }, []);
-
   const stopListening = useCallback(() => {
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
-      recorderRef.current.stop();
-      return;
-    }
     recognitionRef.current?.stop();
     recognitionRef.current = null;
-    cleanupRecording();
     setListening(false);
     setStatus(isHe ? 'מקשיב' : 'Listening');
-  }, [cleanupRecording, isHe]);
+  }, [isHe]);
 
-  const startBrowserRecognition = useCallback(() => {
+  const toggleListening = useCallback(() => {
+    if (busy) return;
+    if (listening) {
+      stopListening();
+      return;
+    }
+
     const SpeechRecognition = getSpeechRecognition();
     if (!SpeechRecognition) {
       setStatus(isHe ? 'אין תמיכה במיקרופון' : 'Mic unsupported');
       return;
     }
 
+    stopSpeech();
     let spoken = '';
     const recognition = new SpeechRecognition();
     recognition.lang = isHe ? 'he-IL' : 'en-US';
@@ -291,103 +200,15 @@ export default function Advisor({ persona, lang, onBack }) {
 
     recognitionRef.current = recognition;
     recognition.start();
-  }, [isHe, send]);
-
-  const startRecordedTranscription = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/mp4')
-          ? 'audio/mp4'
-          : '';
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      micStreamRef.current = stream;
-      recorderRef.current = recorder;
-      chunksRef.current = [];
-
-      recorder.ondataavailable = event => {
-        if (event.data?.size > 0) chunksRef.current.push(event.data);
-      };
-
-      recorder.onstart = () => {
-        setListening(true);
-        setStatus(isHe ? 'מקליטה... לחצו לעצירה' : 'Recording... tap to stop');
-      };
-
-      recorder.onerror = event => {
-        console.warn('Audio recording failed:', event?.error || event);
-        cleanupRecording();
-        recorderRef.current = null;
-        setListening(false);
-        setStatus(isHe ? 'בעיה במיקרופון' : 'Mic issue');
-      };
-
-      recorder.onstop = async () => {
-        const type = recorder.mimeType || mimeType || 'audio/webm';
-        const blob = new Blob(chunksRef.current, { type });
-        cleanupRecording();
-        recorderRef.current = null;
-        setListening(false);
-
-        if (blob.size < 1200) {
-          setStatus(isHe ? 'לא נקלט קול ברור' : 'No clear audio');
-          inputRef.current?.focus();
-          return;
-        }
-
-        setStatus(isHe ? 'מתמללת...' : 'Transcribing...');
-        const data = await transcribeAudioBlob(blob, lang);
-        if (data?.text?.trim()) {
-          const text = data.text.trim();
-          setInput(text);
-          send(text);
-        } else {
-          console.warn('Speech-to-text failed:', data?.error || 'empty transcript');
-          setStatus(isHe ? 'לא הצלחתי לתמלל' : 'Could not transcribe');
-          inputRef.current?.focus();
-        }
-      };
-
-      recorder.start();
-      recordTimerRef.current = setTimeout(() => {
-        if (recorder.state !== 'inactive') recorder.stop();
-      }, 30000);
-    } catch (error) {
-      console.warn('Could not access microphone:', error);
-      setStatus(isHe ? 'בדקו הרשאת מיקרופון' : 'Check mic permission');
-      inputRef.current?.focus();
-    }
-  }, [cleanupRecording, isHe, lang, send]);
-
-  const toggleListening = useCallback(() => {
-    if (busy) return;
-    if (listening) {
-      stopListening();
-      return;
-    }
-
-    stopSpeech();
-    if (isRecordedSpeechSupported()) startRecordedTranscription();
-    else startBrowserRecognition();
-  }, [busy, listening, stopListening, startBrowserRecognition, startRecordedTranscription]);
+  }, [busy, listening, stopListening, isHe, send]);
 
   useEffect(() => () => {
     recognitionRef.current?.stop();
-    if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
-    cleanupRecording();
-  }, [cleanupRecording]);
+  }, []);
 
   const toggleVoice = () => {
     setVoiceOn(v => !v);
-    if (voiceOn) {
-      speechRunRef.current += 1;
-      stopSpeech();
-      setSpeaking(false);
-      setStatus(isHe ? 'מקשיב' : 'Listening');
-    }
+    if (voiceOn) stopSpeech();
   };
 
   const QUICK = isHe
@@ -700,7 +521,7 @@ export default function Advisor({ persona, lang, onBack }) {
                 backdropFilter: 'blur(8px)',
               }}
             />
-            {(isSpeechInputSupported() || isRecordedSpeechSupported()) && (
+            {isSpeechInputSupported() && (
               <button onClick={toggleListening} disabled={busy} style={{
                 width: 42, height: 42, borderRadius: 12,
                 border: `1px solid ${listening ? '#ef4444' : ac + '35'}`,

@@ -75,35 +75,6 @@ export function stopSpeech() {
   window.speechSynthesis?.cancel();
 }
 
-export async function transcribeAudioBlob(blob, lang) {
-  try {
-    const audioBase64 = await blobToBase64(blob);
-    const r = await fetch('/api/stt', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        audioBase64,
-        mimeType: blob.type || 'audio/webm',
-        lang,
-      }),
-    });
-    const data = await r.json();
-    if (!r.ok) return { error: data?.error || `STT ${r.status}` };
-    return data; // { text, languageCode }
-  } catch (error) {
-    return { error: error?.message || 'Speech transcription failed' };
-  }
-}
-
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(String(reader.result || '').split(',')[1] || '');
-    reader.onerror = () => reject(reader.error || new Error('Failed to read audio'));
-    reader.readAsDataURL(blob);
-  });
-}
-
 export function getSpeechRecognition() {
   if (typeof window === 'undefined') return null;
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -111,12 +82,6 @@ export function getSpeechRecognition() {
 
 export function isSpeechInputSupported() {
   return Boolean(getSpeechRecognition());
-}
-
-export function isRecordedSpeechSupported() {
-  return typeof navigator !== 'undefined' &&
-    Boolean(navigator.mediaDevices?.getUserMedia) &&
-    typeof MediaRecorder !== 'undefined';
 }
 
 // ── Play ElevenLabs audio buffer ───────────────────────
