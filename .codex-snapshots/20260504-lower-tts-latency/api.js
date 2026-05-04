@@ -140,19 +140,47 @@ export async function playElevenLabsStreamInput(text, voiceId, onStart, onEnd) {
 }
 
 export async function callLLMVoiceStream({ system, messages, voiceId, lang, onText, onStart, onEnd }) {
-  const hasAudioContext = typeof window !== 'undefined' && Boolean(window.AudioContext || window.webkitAudioContext);
-  if (!voiceId || !hasAudioContext) {
-    return { ok: false, text: '' };
-  }
+  if (!voiceId || !supportsProgressiveAudio()) return { ok: false, text: '' };
 
   const controller = new AbortController();
   currentStreamAbort?.abort();
   currentStreamAbort = controller;
 
+  let objectUrl = '';
   let fullText = '';
-  let streamPlayer = null;
+  let started = false;
+  let ended = false;
+  const queue = [];
 
   try {
+    const mediaSource = new MediaSource();
+    objectUrl = URL.createObjectURL(mediaSource);
+    const audio = new Audio(objectUrl);
+    currentAudio = audio;
+
+    await new Promise((resolve, reject) => {
+      mediaSource.addEventListener('sourceopen', resolve, { once: true });
+      mediaSource.addEventListener('error', reject, { once: true });
+    });
+
+    const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+    const appendNext = () => {
+      if (sourceBuffer.updating || !queue.length) return;
+      sourceBuffer.appendBuffer(queue.shift());
+    };
+
+    sourceBuffer.addEventListener('updateend', () => {
+      if (!started) {
+        started = true;
+        onStart?.();
+        audio.play().catch(error => console.warn('Voice stream play failed:', error));
+      }
+      appendNext();
+      if (ended && !sourceBuffer.updating && !queue.length && mediaSource.readyState === 'open') {
+        mediaSource.endOfStream();
+      }
+    });
+
     const response = await fetch('/api/chat-voice-stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -167,6 +195,7 @@ export async function callLLMVoiceStream({ system, messages, voiceId, lang, onTe
     });
 
     if (!response.ok || !response.body) {
+      cleanupStreamAudio(objectUrl);
       return { ok: false, text: '' };
     }
 
@@ -188,10 +217,8 @@ export async function callLLMVoiceStream({ system, messages, voiceId, lang, onTe
           fullText += event.delta;
           onText?.(event.delta, fullText);
         } else if (event.type === 'audio' && event.audio) {
-          if (!streamPlayer) {
-            streamPlayer = createPcmPlayer(event.sampleRate || 16000, onStart);
-          }
-          streamPlayer.push(base64ToBytes(event.audio));
+          queue.push(base64ToBytes(event.audio));
+          appendNext();
         } else if (event.type === 'done') {
           fullText = event.text || fullText;
         } else if (event.type === 'error') {
@@ -200,80 +227,30 @@ export async function callLLMVoiceStream({ system, messages, voiceId, lang, onTe
       }
     }
 
-    streamPlayer?.finish(onEnd);
-    if (!streamPlayer) onEnd?.();
+    ended = true;
+    if (!queue.length) {
+      cleanupStreamAudio(objectUrl);
+      onEnd?.();
+    } else if (!sourceBuffer.updating && mediaSource.readyState === 'open') {
+      mediaSource.endOfStream();
+    }
+
+    audio.onended = () => {
+      cleanupStreamAudio(objectUrl);
+      onEnd?.();
+    };
+    audio.onerror = () => {
+      cleanupStreamAudio(objectUrl);
+      onEnd?.();
+    };
 
     return { ok: true, text: fullText.trim() };
   } catch (error) {
     if (error?.name !== 'AbortError') console.warn('LLM voice stream failed:', error);
-    streamPlayer?.stop();
+    cleanupStreamAudio(objectUrl);
     onEnd?.();
     return { ok: false, text: fullText.trim(), error: error?.message };
   }
-}
-
-function createPcmPlayer(sampleRate, onStart) {
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  const ctx = new AudioCtx();
-  currentAudioContext?.close();
-  currentAudioContext = ctx;
-
-  let nextTime = ctx.currentTime + 0.03;
-  let started = false;
-  let finishTimer = null;
-
-  const push = bytes => {
-    const samples = pcm16ToFloat32(bytes);
-    if (!samples.length) return;
-
-    const buffer = ctx.createBuffer(1, samples.length, sampleRate);
-    buffer.copyToChannel(samples, 0);
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-    currentSource = source;
-
-    const startAt = Math.max(nextTime, ctx.currentTime + 0.02);
-    source.start(startAt);
-    nextTime = startAt + buffer.duration;
-
-    if (!started) {
-      started = true;
-      onStart?.();
-    }
-  };
-
-  return {
-    push,
-    finish: onEnd => {
-      clearTimeout(finishTimer);
-      const delay = Math.max(80, (nextTime - ctx.currentTime) * 1000 + 80);
-      finishTimer = setTimeout(() => {
-        currentSource = null;
-        currentAudioContext = null;
-        ctx.close();
-        onEnd?.();
-      }, delay);
-    },
-    stop: () => {
-      clearTimeout(finishTimer);
-      try {
-        currentSource?.stop();
-      } catch {}
-      currentSource = null;
-      currentAudioContext = null;
-      ctx.close();
-    },
-  };
-}
-
-function pcm16ToFloat32(bytes) {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const samples = new Float32Array(Math.floor(bytes.byteLength / 2));
-  for (let i = 0; i < samples.length; i += 1) {
-    samples[i] = Math.max(-1, Math.min(1, view.getInt16(i * 2, true) / 32768));
-  }
-  return samples;
 }
 
 function supportsProgressiveAudio() {

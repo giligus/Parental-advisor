@@ -25,7 +25,6 @@ const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_flash_v2_5';
 const ELEVENLABS_MODEL_HE = process.env.ELEVENLABS_MODEL_HE || 'eleven_v3';
 const ELEVENLABS_STT_MODEL = process.env.ELEVENLABS_STT_MODEL || 'scribe_v2';
 const ELEVENLABS_OUTPUT_FORMAT = process.env.ELEVENLABS_OUTPUT_FORMAT || 'mp3_22050_32';
-const ELEVENLABS_STREAM_OUTPUT_FORMAT = process.env.ELEVENLABS_STREAM_OUTPUT_FORMAT || 'pcm_16000';
 
 // Model selection — can override via env
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
@@ -168,14 +167,14 @@ async function streamOpenAI(system, messages, maxTokens, onDelta) {
   }
 }
 
-function createElevenStream({ textHint, voiceId, outputFormat = ELEVENLABS_OUTPUT_FORMAT, onAudio, onError }) {
+function createElevenStream({ textHint, voiceId, onAudio, onError }) {
   const isHebrew = looksHebrew(textHint);
   const modelId = isHebrew ? ELEVENLABS_MODEL_HE : ELEVENLABS_MODEL;
   const languageCode = isHebrew ? 'he' : 'en';
   const url = new URL(`wss://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream-input`);
   url.searchParams.set('model_id', modelId);
   url.searchParams.set('language_code', languageCode);
-  url.searchParams.set('output_format', outputFormat);
+  url.searchParams.set('output_format', ELEVENLABS_OUTPUT_FORMAT);
   url.searchParams.set('auto_mode', 'true');
   url.searchParams.set('sync_alignment', 'false');
   url.searchParams.set('inactivity_timeout', '60');
@@ -195,7 +194,7 @@ function createElevenStream({ textHint, voiceId, outputFormat = ELEVENLABS_OUTPU
           use_speaker_boost: true,
         },
         generation_config: {
-          chunk_length_schedule: [25, 45, 75, 110],
+          chunk_length_schedule: [40, 80, 120, 160],
         },
       }));
       resolve();
@@ -246,13 +245,10 @@ function createElevenStream({ textHint, voiceId, outputFormat = ELEVENLABS_OUTPU
   };
 }
 
-function shouldFlushTts(text = '', isFirst = false) {
+function shouldFlushTts(text = '') {
   const trimmed = text.trim();
   if (!trimmed) return false;
-  const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
-  return /[.!?…:;؟]$/.test(trimmed) ||
-    trimmed.length >= (isFirst ? 28 : 48) ||
-    wordCount >= (isFirst ? 4 : 7);
+  return /[.!?…:;؟]$/.test(trimmed) || trimmed.length >= 85;
 }
 
 // ── Anthropic call ────────────────────────────────────
@@ -361,7 +357,6 @@ app.post('/api/chat-voice-stream', async (req, res) => {
   let closed = false;
   let fullText = '';
   let ttsBuffer = '';
-  let ttsChunksSent = 0;
   let eventId = 0;
 
   const writeEvent = event => {
@@ -379,15 +374,7 @@ app.post('/api/chat-voice-stream', async (req, res) => {
   const tts = createElevenStream({
     textHint: lang === 'he' ? 'שלום' : 'Hello',
     voiceId,
-    outputFormat: ELEVENLABS_STREAM_OUTPUT_FORMAT,
-    onAudio: audio => writeEvent({
-      type: 'audio',
-      audio,
-      format: ELEVENLABS_STREAM_OUTPUT_FORMAT,
-      sampleRate: ELEVENLABS_STREAM_OUTPUT_FORMAT.startsWith('pcm_')
-        ? Number(ELEVENLABS_STREAM_OUTPUT_FORMAT.split('_')[1]) || 16000
-        : null,
-    }),
+    onAudio: audio => writeEvent({ type: 'audio', audio }),
     onError: error => writeEvent({ type: 'warning', message: error.message || 'TTS stream warning' }),
   });
 
@@ -404,10 +391,9 @@ app.post('/api/chat-voice-stream', async (req, res) => {
     const flushTts = force => {
       const text = ttsBuffer.trim();
       if (!text) return;
-      if (!force && !shouldFlushTts(text, ttsChunksSent === 0)) return;
+      if (!force && !shouldFlushTts(text)) return;
       tts.send(text);
       ttsBuffer = '';
-      ttsChunksSent += 1;
     };
 
     const handleDelta = async delta => {
@@ -659,7 +645,6 @@ app.get('/api/config', (req, res) => {
     ttsModelHe: ELEVENLABS_MODEL_HE,
     sttModel: ELEVENLABS_STT_MODEL,
     ttsOutputFormat: ELEVENLABS_OUTPUT_FORMAT,
-    ttsStreamOutputFormat: ELEVENLABS_STREAM_OUTPUT_FORMAT,
   });
 });
 
