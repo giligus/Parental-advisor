@@ -139,10 +139,131 @@ export async function playElevenLabsStreamInput(text, voiceId, onStart, onEnd) {
   }
 }
 
+export async function callLLMVoiceStream({ system, messages, voiceId, lang, onText, onStart, onEnd }) {
+  if (!voiceId || !supportsProgressiveAudio()) return { ok: false, text: '' };
+
+  const controller = new AbortController();
+  currentStreamAbort?.abort();
+  currentStreamAbort = controller;
+
+  let objectUrl = '';
+  let fullText = '';
+  let started = false;
+  let ended = false;
+  const queue = [];
+
+  try {
+    const mediaSource = new MediaSource();
+    objectUrl = URL.createObjectURL(mediaSource);
+    const audio = new Audio(objectUrl);
+    currentAudio = audio;
+
+    await new Promise((resolve, reject) => {
+      mediaSource.addEventListener('sourceopen', resolve, { once: true });
+      mediaSource.addEventListener('error', reject, { once: true });
+    });
+
+    const sourceBuffer = mediaSource.addSourceBuffer('audio/mpeg');
+    const appendNext = () => {
+      if (sourceBuffer.updating || !queue.length) return;
+      sourceBuffer.appendBuffer(queue.shift());
+    };
+
+    sourceBuffer.addEventListener('updateend', () => {
+      if (!started) {
+        started = true;
+        onStart?.();
+        audio.play().catch(error => console.warn('Voice stream play failed:', error));
+      }
+      appendNext();
+      if (ended && !sourceBuffer.updating && !queue.length && mediaSource.readyState === 'open') {
+        mediaSource.endOfStream();
+      }
+    });
+
+    const response = await fetch('/api/chat-voice-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        system,
+        messages,
+        voiceId,
+        lang,
+        max_tokens: 420,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok || !response.body) {
+      cleanupStreamAudio(objectUrl);
+      return { ok: false, text: '' };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type === 'text' && event.delta) {
+          fullText += event.delta;
+          onText?.(event.delta, fullText);
+        } else if (event.type === 'audio' && event.audio) {
+          queue.push(base64ToBytes(event.audio));
+          appendNext();
+        } else if (event.type === 'done') {
+          fullText = event.text || fullText;
+        } else if (event.type === 'error') {
+          throw new Error(event.error || 'Voice stream failed');
+        }
+      }
+    }
+
+    ended = true;
+    if (!queue.length) {
+      cleanupStreamAudio(objectUrl);
+      onEnd?.();
+    } else if (!sourceBuffer.updating && mediaSource.readyState === 'open') {
+      mediaSource.endOfStream();
+    }
+
+    audio.onended = () => {
+      cleanupStreamAudio(objectUrl);
+      onEnd?.();
+    };
+    audio.onerror = () => {
+      cleanupStreamAudio(objectUrl);
+      onEnd?.();
+    };
+
+    return { ok: true, text: fullText.trim() };
+  } catch (error) {
+    if (error?.name !== 'AbortError') console.warn('LLM voice stream failed:', error);
+    cleanupStreamAudio(objectUrl);
+    onEnd?.();
+    return { ok: false, text: fullText.trim(), error: error?.message };
+  }
+}
+
 function supportsProgressiveAudio() {
   return typeof window !== 'undefined' &&
     typeof MediaSource !== 'undefined' &&
     MediaSource.isTypeSupported?.('audio/mpeg');
+}
+
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 function cleanupStreamAudio(objectUrl) {

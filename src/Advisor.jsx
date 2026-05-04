@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Waveform from './Waveform';
-import { callLLM, elevenLabsSpeak, webSpeechSpeak, stopSpeech, playAudioBase64, playElevenLabsStreamInput, buildHistory, getSpeechRecognition, isSpeechInputSupported, isRecordedSpeechSupported, transcribeAudioBlob } from './api';
+import { callLLM, callLLMVoiceStream, elevenLabsSpeak, webSpeechSpeak, stopSpeech, playAudioBase64, playElevenLabsStreamInput, buildHistory, getSpeechRecognition, isSpeechInputSupported, isRecordedSpeechSupported, transcribeAudioBlob } from './api';
 import { loadAdvisorCase, prepareAdvisorTurn, saveAdvisorCase } from './advisorBrain';
 
 function ProfileField({ label, items }) {
@@ -217,10 +217,39 @@ export default function Advisor({ persona, lang, onBack }) {
       setCaseData(turn.caseData);
       saveAdvisorCase(turn.caseData);
 
-      const reply = await callLLM(turn.system, buildHistory(updated));
-      setMsgs(p => [...p, { role: 'advisor', text: reply }]);
-      setBusy(false);
-      doSpeak(reply);
+      const history = buildHistory(updated);
+      const voiceId = persona ? (isHe ? persona.voiceIdHe : persona.voiceId) : null;
+
+      if (voiceOn && voiceId) {
+        const streamId = `stream_${Date.now()}`;
+        setMsgs(p => [...p, { role: 'advisor', text: '', streamId }]);
+        setBusy(false);
+        setStatus(isHe ? 'מתחילה לענות...' : 'Starting response...');
+        stopSpeech();
+
+        const streamed = await callLLMVoiceStream({
+          system: turn.system,
+          messages: history,
+          voiceId,
+          lang,
+          onText: (_delta, fullText) => {
+            setMsgs(p => p.map(msg => msg.streamId === streamId ? { ...msg, text: fullText } : msg));
+          },
+          onStart: () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
+          onEnd: () => { setSpeaking(false); setStatus(isHe ? 'מקשיב' : 'Listening'); inputRef.current?.focus(); },
+        });
+
+        if (!streamed.ok) {
+          const reply = streamed.text || await callLLM(turn.system, history);
+          setMsgs(p => p.map(msg => msg.streamId === streamId ? { ...msg, text: reply } : msg));
+          if (!streamed.text) doSpeak(reply);
+        }
+      } else {
+        const reply = await callLLM(turn.system, history);
+        setMsgs(p => [...p, { role: 'advisor', text: reply }]);
+        setBusy(false);
+        doSpeak(reply);
+      }
     } catch (error) {
       console.error('Chat request failed:', error);
       const detail = error?.message ? ` (${error.message})` : '';

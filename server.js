@@ -81,6 +81,176 @@ async function parseWsMessage(data) {
   return JSON.parse(Buffer.from(data).toString('utf8'));
 }
 
+async function* readSseData(response) {
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  for await (const chunk of response.body) {
+    buffer += decoder.decode(chunk, { stream: true });
+    const events = buffer.split('\n\n');
+    buffer = events.pop() || '';
+
+    for (const event of events) {
+      const data = event
+        .split('\n')
+        .filter(line => line.startsWith('data:'))
+        .map(line => line.slice(5).trimStart())
+        .join('\n')
+        .trim();
+      if (!data) continue;
+      if (data === '[DONE]') return;
+      yield data;
+    }
+  }
+}
+
+async function streamAnthropic(system, messages, maxTokens, onDelta) {
+  if (!ANTHROPIC_KEY) throw new Error('ANTHROPIC_API_KEY not set');
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: maxTokens,
+      system,
+      messages,
+      stream: true,
+    }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data?.error?.message || `Anthropic HTTP ${response.status}`);
+  }
+
+  for await (const data of readSseData(response)) {
+    const event = JSON.parse(data);
+    const text = event?.type === 'content_block_delta' && event?.delta?.type === 'text_delta'
+      ? event.delta.text
+      : '';
+    if (text) await onDelta(text);
+  }
+}
+
+async function streamOpenAI(system, messages, maxTokens, onDelta) {
+  if (!OPENAI_KEY) throw new Error('OPENAI_API_KEY not set');
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${OPENAI_KEY}`,
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      max_tokens: maxTokens,
+      messages: [{ role: 'system', content: system }, ...messages],
+      temperature: 0.7,
+      stream: true,
+    }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data?.error?.message || `OpenAI HTTP ${response.status}`);
+  }
+
+  for await (const data of readSseData(response)) {
+    const event = JSON.parse(data);
+    const text = event?.choices?.[0]?.delta?.content || '';
+    if (text) await onDelta(text);
+  }
+}
+
+function createElevenStream({ textHint, voiceId, onAudio, onError }) {
+  const isHebrew = looksHebrew(textHint);
+  const modelId = isHebrew ? ELEVENLABS_MODEL_HE : ELEVENLABS_MODEL;
+  const languageCode = isHebrew ? 'he' : 'en';
+  const url = new URL(`wss://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream-input`);
+  url.searchParams.set('model_id', modelId);
+  url.searchParams.set('language_code', languageCode);
+  url.searchParams.set('output_format', ELEVENLABS_OUTPUT_FORMAT);
+  url.searchParams.set('auto_mode', 'true');
+  url.searchParams.set('sync_alignment', 'false');
+  url.searchParams.set('inactivity_timeout', '60');
+
+  const ws = new WebSocket(url);
+  let closed = false;
+
+  const opened = new Promise((resolve, reject) => {
+    ws.addEventListener('open', () => {
+      ws.send(JSON.stringify({
+        text: ' ',
+        xi_api_key: ELEVENLABS_KEY,
+        voice_settings: {
+          stability: isHebrew ? 0.38 : 0.5,
+          similarity_boost: 0.82,
+          style: isHebrew ? 0.45 : 0.3,
+          use_speaker_boost: true,
+        },
+        generation_config: {
+          chunk_length_schedule: [40, 80, 120, 160],
+        },
+      }));
+      resolve();
+    }, { once: true });
+    ws.addEventListener('error', () => reject(new Error('ElevenLabs WebSocket error')), { once: true });
+  });
+
+  const done = new Promise(resolve => {
+    ws.addEventListener('message', async event => {
+      try {
+        const data = await parseWsMessage(event.data);
+        if (data?.audio) onAudio(data.audio);
+        if (data?.isFinal) {
+          closed = true;
+          resolve();
+          if (ws.readyState === WebSocket.OPEN) ws.close();
+        }
+      } catch (err) {
+        onError?.(err);
+      }
+    });
+    ws.addEventListener('close', () => {
+      closed = true;
+      resolve();
+    });
+    ws.addEventListener('error', () => {
+      closed = true;
+      onError?.(new Error('ElevenLabs WebSocket error'));
+      resolve();
+    });
+  });
+
+  return {
+    opened,
+    done,
+    send: text => {
+      if (!closed && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ text: `${text} `, try_trigger_generation: true }));
+      }
+    },
+    close: () => {
+      if (!closed && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ text: '' }));
+    },
+    abort: () => {
+      closed = true;
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close();
+    },
+  };
+}
+
+function shouldFlushTts(text = '') {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  return /[.!?…:;؟]$/.test(trimmed) || trimmed.length >= 85;
+}
+
 // ── Anthropic call ────────────────────────────────────
 async function callAnthropic(system, messages, maxTokens) {
   if (!ANTHROPIC_KEY) throw new Error('ANTHROPIC_API_KEY not set');
@@ -171,6 +341,86 @@ app.post('/api/chat', async (req, res) => {
       category,
       provider: PROVIDER,
     });
+  }
+});
+
+app.post('/api/chat-voice-stream', async (req, res) => {
+  const { system, messages, voiceId, lang, max_tokens = 420 } = req.body || {};
+
+  if (!system || !Array.isArray(messages)) {
+    return res.status(400).json({ error: 'Missing system or messages' });
+  }
+  if (!ELEVENLABS_KEY || !voiceId) {
+    return res.status(400).json({ error: 'Missing ElevenLabs configuration or voiceId' });
+  }
+
+  let closed = false;
+  let fullText = '';
+  let ttsBuffer = '';
+  let eventId = 0;
+
+  const writeEvent = event => {
+    if (closed || res.destroyed) return;
+    res.write(`${JSON.stringify({ id: eventId += 1, ...event })}\n`);
+  };
+
+  res.writeHead(200, {
+    'Content-Type': 'application/x-ndjson; charset=utf-8',
+    'Cache-Control': 'no-store, no-transform',
+    'Transfer-Encoding': 'chunked',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const tts = createElevenStream({
+    textHint: lang === 'he' ? 'שלום' : 'Hello',
+    voiceId,
+    onAudio: audio => writeEvent({ type: 'audio', audio }),
+    onError: error => writeEvent({ type: 'warning', message: error.message || 'TTS stream warning' }),
+  });
+
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      closed = true;
+      tts.abort();
+    }
+  });
+
+  try {
+    await tts.opened;
+
+    const flushTts = force => {
+      const text = ttsBuffer.trim();
+      if (!text) return;
+      if (!force && !shouldFlushTts(text)) return;
+      tts.send(text);
+      ttsBuffer = '';
+    };
+
+    const handleDelta = async delta => {
+      fullText += delta;
+      ttsBuffer += delta;
+      writeEvent({ type: 'text', delta });
+      flushTts(false);
+    };
+
+    if (PROVIDER === 'openai') {
+      await streamOpenAI(system, messages, max_tokens, handleDelta);
+    } else {
+      await streamAnthropic(system, messages, max_tokens, handleDelta);
+    }
+
+    flushTts(true);
+    tts.close();
+    await tts.done;
+    writeEvent({ type: 'done', text: fullText, provider: PROVIDER });
+    res.end();
+  } catch (err) {
+    console.error(`[/api/chat-voice-stream] ${PROVIDER} error:`, err.message);
+    tts.abort();
+    if (!closed) {
+      writeEvent({ type: 'error', error: err.message || 'Voice stream failed', provider: PROVIDER });
+      res.end();
+    }
   }
 });
 
