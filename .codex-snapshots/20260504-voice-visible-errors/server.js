@@ -23,8 +23,6 @@ const OPENAI_KEY    = process.env.OPENAI_API_KEY    || '';
 const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || '';
 const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_flash_v2_5';
 const ELEVENLABS_MODEL_HE = process.env.ELEVENLABS_MODEL_HE || 'eleven_v3';
-const ELEVENLABS_STREAM_MODEL = process.env.ELEVENLABS_STREAM_MODEL || 'eleven_flash_v2_5';
-const ELEVENLABS_STREAM_MODEL_HE = process.env.ELEVENLABS_STREAM_MODEL_HE || 'eleven_flash_v2_5';
 const ELEVENLABS_STT_MODEL = process.env.ELEVENLABS_STT_MODEL || 'scribe_v2';
 const ELEVENLABS_OUTPUT_FORMAT = process.env.ELEVENLABS_OUTPUT_FORMAT || 'mp3_22050_32';
 const ELEVENLABS_STREAM_OUTPUT_FORMAT = process.env.ELEVENLABS_STREAM_OUTPUT_FORMAT || 'pcm_16000';
@@ -173,7 +171,7 @@ async function streamOpenAI(system, messages, maxTokens, onDelta) {
 
 function createElevenStream({ textHint, voiceId, outputFormat = ELEVENLABS_OUTPUT_FORMAT, onAudio, onError }) {
   const isHebrew = looksHebrew(textHint);
-  const modelId = isHebrew ? ELEVENLABS_STREAM_MODEL_HE : ELEVENLABS_STREAM_MODEL;
+  const modelId = isHebrew ? ELEVENLABS_MODEL_HE : ELEVENLABS_MODEL;
   const languageCode = isHebrew ? 'he' : 'en';
   const url = new URL(`wss://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream-input`);
   url.searchParams.set('model_id', modelId);
@@ -720,8 +718,6 @@ app.get('/api/config', (req, res) => {
     hasTtsKey: !!ELEVENLABS_KEY,
     ttsModel: ELEVENLABS_MODEL,
     ttsModelHe: ELEVENLABS_MODEL_HE,
-    ttsStreamModel: ELEVENLABS_STREAM_MODEL,
-    ttsStreamModelHe: ELEVENLABS_STREAM_MODEL_HE,
     sttModel: ELEVENLABS_STT_MODEL,
     ttsOutputFormat: ELEVENLABS_OUTPUT_FORMAT,
     ttsStreamOutputFormat: ELEVENLABS_STREAM_OUTPUT_FORMAT,

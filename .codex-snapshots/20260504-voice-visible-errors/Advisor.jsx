@@ -70,7 +70,6 @@ export default function Advisor({ persona, lang, onBack }) {
   const [voiceOn, setVoiceOn] = useState(true);
   const [speaking, setSpeaking] = useState(false);
   const [listening, setListening] = useState(false);
-  const [voiceIssue, setVoiceIssue] = useState('');
   const [showProfiles, setShowProfiles] = useState(false);
   const [status, setStatus] = useState(lang === 'he' ? 'מקשיב' : 'Listening');
   const [caseData, setCaseData] = useState(() => loadAdvisorCase());
@@ -137,7 +136,6 @@ export default function Advisor({ persona, lang, onBack }) {
   const doSpeak = useCallback((text) => {
     const runId = speechRunRef.current + 1;
     speechRunRef.current = runId;
-    setVoiceIssue('');
     stopSpeech();
 
     if (!voiceOn) {
@@ -167,7 +165,6 @@ export default function Advisor({ persona, lang, onBack }) {
           if (!played) {
             console.warn('ElevenLabs unavailable, using browser speech fallback:', data?.error || 'unknown TTS error');
             setStatus(isHe ? 'קול דפדפן' : 'Browser voice');
-            setVoiceIssue(isHe ? `קול ElevenLabs לא זמין: ${data?.error || 'שגיאה לא ידועה'}` : `ElevenLabs voice unavailable: ${data?.error || 'unknown error'}`);
             await playBrowserSpeech(speechChunks.slice(index).join(' '), true);
             return;
           }
@@ -245,9 +242,6 @@ export default function Advisor({ persona, lang, onBack }) {
         });
 
         if (!streamed.ok) {
-          if (streamed.error) {
-            setVoiceIssue(isHe ? `זרימת קול נכשלה: ${streamed.error}` : `Voice stream failed: ${streamed.error}`);
-          }
           const reply = streamed.text || await callLLM(turn.system, history);
           setMsgs(p => p.map(msg => msg.streamId === streamId ? { ...msg, text: reply } : msg));
           if (!streamed.text) doSpeak(reply);
@@ -348,7 +342,6 @@ export default function Advisor({ persona, lang, onBack }) {
 
   const startRecordedTranscription = useCallback(async () => {
     try {
-      setVoiceIssue('');
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
@@ -392,8 +385,7 @@ export default function Advisor({ persona, lang, onBack }) {
           const level = Math.sqrt(sum / data.length) / 128;
           const now = performance.now();
 
-          if (level > 0.012) {
-            if (!heardVoice) setStatus(isHe ? 'שמעתי, תמשיכו...' : 'I hear you, keep speaking...');
+          if (level > 0.025) {
             heardVoice = true;
             lastVoiceAt = now;
           }
@@ -453,9 +445,7 @@ export default function Advisor({ persona, lang, onBack }) {
           send(text);
         } else {
           console.warn('Speech-to-text failed:', data?.error || 'empty transcript');
-          const issue = data?.error || 'empty transcript';
-          setVoiceIssue(isHe ? `תמלול נכשל: ${issue}` : `Transcription failed: ${issue}`);
-          setStatus(isHe ? 'לא הצלחתי לתמלל' : 'Could not transcribe');
+          setStatus(isHe ? `לא הצלחתי לתמלל${data?.error ? `: ${data.error}` : ''}` : `Could not transcribe${data?.error ? `: ${data.error}` : ''}`);
           inputRef.current?.focus();
         }
       };
@@ -466,7 +456,6 @@ export default function Advisor({ persona, lang, onBack }) {
       }, 30000);
     } catch (error) {
       console.warn('Could not access microphone:', error);
-      setVoiceIssue(isHe ? `אין גישה למיקרופון: ${error?.message || error}` : `No microphone access: ${error?.message || error}`);
       setStatus(isHe ? 'בדקו הרשאת מיקרופון' : 'Check mic permission');
       inputRef.current?.focus();
     }
@@ -844,21 +833,6 @@ export default function Advisor({ persona, lang, onBack }) {
                   fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0,
                 }}>{q}</button>
               ))}
-            </div>
-          )}
-          {voiceIssue && (
-            <div style={{
-              marginTop: 7,
-              padding: '7px 10px',
-              borderRadius: 10,
-              border: '1px solid rgba(239,68,68,0.25)',
-              background: 'rgba(239,68,68,0.08)',
-              color: '#fca5a5',
-              fontSize: 12,
-              lineHeight: 1.45,
-              direction: isHe ? 'rtl' : 'ltr',
-            }}>
-              {voiceIssue}
             </div>
           )}
         </div>

@@ -112,7 +112,6 @@ export async function playElevenLabsStreamInput(text, voiceId, onStart, onEnd) {
     });
 
     if (!response.ok || !response.body) {
-      console.warn('TTS stream-input failed:', await readError(response));
       cleanupStreamAudio(objectUrl);
       return false;
     }
@@ -168,7 +167,7 @@ export async function callLLMVoiceStream({ system, messages, voiceId, lang, onTe
     });
 
     if (!response.ok || !response.body) {
-      return { ok: false, text: '', error: await readError(response) };
+      return { ok: false, text: '' };
     }
 
     const reader = response.body.getReader();
@@ -210,19 +209,6 @@ export async function callLLMVoiceStream({ system, messages, voiceId, lang, onTe
     streamPlayer?.stop();
     onEnd?.();
     return { ok: false, text: fullText.trim(), error: error?.message };
-  }
-}
-
-async function readError(response) {
-  try {
-    const data = await response.json();
-    return data?.error || JSON.stringify(data);
-  } catch {
-    try {
-      return await response.text();
-    } catch {
-      return `HTTP ${response.status}`;
-    }
   }
 }
 
