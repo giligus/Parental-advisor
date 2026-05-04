@@ -6,7 +6,7 @@ export async function callLLM(system, messages) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      max_tokens: 420,
+      max_tokens: 600,
       system,
       messages,
     }),
@@ -37,7 +37,7 @@ export async function elevenLabsSpeak(text, voiceId) {
     });
     const data = await r.json();
     if (!r.ok) return { error: data?.error || `TTS ${r.status}` };
-    return data; // { audio_base64 }
+    return data; // { audio_base64, alignment }
   } catch (error) {
     return { error: error?.message || 'TTS request failed' };
   }
@@ -76,7 +76,6 @@ export function stopSpeech() {
 }
 
 export function getSpeechRecognition() {
-  if (typeof window === 'undefined') return null;
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
 

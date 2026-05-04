@@ -142,12 +142,11 @@ app.post('/api/tts', async (req, res) => {
     const isHebrew = looksHebrew(text);
     const modelId = isHebrew ? ELEVENLABS_MODEL_HE : ELEVENLABS_MODEL;
     const languageCode = isHebrew ? 'he' : 'en';
-    const eleven = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`, {
+    const eleven = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'xi-api-key': ELEVENLABS_KEY,
-        Accept: 'audio/mpeg',
       },
       body: JSON.stringify({
         text,
@@ -163,14 +162,8 @@ app.post('/api/tts', async (req, res) => {
       }),
     });
 
+    const data = await eleven.json();
     if (!eleven.ok) {
-      const raw = await eleven.text();
-      let data = {};
-      try {
-        data = JSON.parse(raw);
-      } catch {
-        data = { message: raw };
-      }
       return res.status(eleven.status).json({
         error: data?.detail?.message || data?.message || 'ElevenLabs API error',
         model: modelId,
@@ -178,8 +171,7 @@ app.post('/api/tts', async (req, res) => {
       });
     }
 
-    const audio = Buffer.from(await eleven.arrayBuffer()).toString('base64');
-    return res.json({ audio_base64: audio, model: modelId, languageCode });
+    return res.json({ ...data, model: modelId, languageCode });
   } catch (err) {
     console.error('[/api/tts] ElevenLabs error:', err.message);
     return res.status(500).json({ error: 'ElevenLabs proxy failed' });

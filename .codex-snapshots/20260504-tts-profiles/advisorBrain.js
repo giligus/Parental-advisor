@@ -200,10 +200,7 @@ export function prepareAdvisorTurn({ message, caseData, lang, persona }) {
   const policy = selectPolicy(state, route, event);
   const activeProfile = next.activeProfileId ? next.profiles[next.activeProfileId] : null;
 
-  let system = buildSystemPrompt({ lang, persona, caseData: next, route, event, state, policy, activeProfile });
-  system += lang === 'he'
-    ? '\n\nResponse length override: reply in Hebrew. Default to 1-3 short sentences. Expand only when the user explicitly asks for analysis, a plan, a simulation, or a big-picture review.'
-    : '\n\nResponse length override: default to 1-3 short sentences. Expand only when the user explicitly asks for analysis, a plan, a simulation, or a big-picture review.';
+  const system = buildSystemPrompt({ lang, persona, caseData: next, route, event, state, policy, activeProfile });
   return { caseData: next, route, event, state, policy, system };
 }
 

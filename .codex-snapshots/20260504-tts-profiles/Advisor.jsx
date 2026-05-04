@@ -3,25 +3,6 @@ import Waveform from './Waveform';
 import { callLLM, elevenLabsSpeak, webSpeechSpeak, stopSpeech, playAudioBase64, buildHistory, getSpeechRecognition, isSpeechInputSupported } from './api';
 import { loadAdvisorCase, prepareAdvisorTurn, saveAdvisorCase } from './advisorBrain';
 
-function ProfileField({ label, items }) {
-  const values = Array.isArray(items) ? items.filter(Boolean) : [];
-  if (!values.length) return null;
-  return (
-    <div style={{ marginTop: 9 }}>
-      <div style={{ color: '#6f7c97', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>{label}</div>
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-        {values.map(item => (
-          <span key={item} style={{
-            padding: '4px 8px', borderRadius: 999,
-            background: 'rgba(255,255,255,0.06)',
-            color: '#aeb9cf', fontSize: 12, lineHeight: 1.4,
-          }}>{item}</span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export default function Advisor({ persona, lang, onBack }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState('');
@@ -29,7 +10,6 @@ export default function Advisor({ persona, lang, onBack }) {
   const [voiceOn, setVoiceOn] = useState(true);
   const [speaking, setSpeaking] = useState(false);
   const [listening, setListening] = useState(false);
-  const [showProfiles, setShowProfiles] = useState(false);
   const [status, setStatus] = useState(lang === 'he' ? 'מקשיב' : 'Listening');
   const [caseData, setCaseData] = useState(() => loadAdvisorCase());
   const chatRef = useRef(null);
@@ -39,17 +19,14 @@ export default function Advisor({ persona, lang, onBack }) {
   const isHe = lang === 'he';
   const ac = persona?.accent || '#4b9cf3';
   const glow = persona?.glow || 'rgba(75,156,243,0.4)';
-  const profiles = Object.values(caseData.profiles || {});
-  const profilesLabel = isHe ? '\u05e4\u05e8\u05d5\u05e4\u05d9\u05dc\u05d9\u05dd' : 'Profiles';
 
   const SYS = persona
     ? (isHe
         ? `אתה ${persona.name}, יועץ התנהגותי מומחה. עברית טבעית, חמה, ישירה. 2-4 משפטים. ללא markdown.`
-        : `You are ${persona.nameEn}, an expert behavioral advisor. Natural warm English. Default to 1-2 short sentences. No markdown.`)
+        : `You are ${persona.nameEn}, an expert behavioral advisor. Natural warm English. 2-4 sentences. No markdown.`)
     : (isHe
         ? 'אתה יועץ התנהגותי. עברית טבעית, חמה. 2-4 משפטים. ללא markdown.'
-        : 'Expert behavioral advisor. Natural warm English. Default to 1-2 short sentences. No markdown.');
-  const greetingSystem = `${SYS}\nDefault to 1-2 short sentences. ${isHe ? 'Reply in Hebrew.' : ''}`;
+        : 'Expert behavioral advisor. Natural warm English. 2-4 sentences. No markdown.');
 
   // Speak a text response using ElevenLabs or Web Speech fallback
   const doSpeak = useCallback((text) => {
@@ -92,7 +69,7 @@ export default function Advisor({ persona, lang, onBack }) {
   useEffect(() => {
     setBusy(true);
     setStatus(isHe ? 'חושב...' : 'Thinking...');
-    callLLM(greetingSystem, [{ role: 'user', content: isHe ? 'שלום, פתח שיחה חמה וקצרה' : 'Hello, open with a warm brief greeting' }])
+    callLLM(SYS, [{ role: 'user', content: isHe ? 'שלום, פתח שיחה חמה וקצרה' : 'Hello, open with a warm brief greeting' }])
       .then(txt => {
         setMsgs([{ role: 'advisor', text: txt }]);
         setBusy(false);
@@ -259,15 +236,6 @@ export default function Advisor({ persona, lang, onBack }) {
 
         {/* Controls */}
         <div style={{ display: 'flex', gap: 6 }}>
-          <button onClick={() => setShowProfiles(true)} style={{
-            padding: '4px 10px', borderRadius: 7,
-            border: `1px solid ${profiles.length ? ac + '50' : '#252d3d'}`,
-            background: profiles.length ? ac + '16' : 'rgba(0,0,0,0.3)',
-            color: profiles.length ? ac : '#4a5270',
-            fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
-          }} title={profilesLabel}>
-            {profilesLabel}{profiles.length ? ` ${profiles.length}` : ''}
-          </button>
           <button onClick={toggleVoice} style={{
             padding: '4px 10px', borderRadius: 7,
             border: `1px solid ${voiceOn ? ac + '70' : '#252d3d'}`,
@@ -286,69 +254,6 @@ export default function Advisor({ persona, lang, onBack }) {
           </button>
         </div>
       </div>
-
-      {showProfiles && (
-        <div onClick={() => setShowProfiles(false)} style={{
-          position: 'fixed', inset: 0, zIndex: 40,
-          background: 'rgba(0,0,0,0.62)',
-          display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-          padding: '72px 16px 16px',
-          backdropFilter: 'blur(8px)',
-        }}>
-          <div onClick={e => e.stopPropagation()} style={{
-            width: 'min(720px, 100%)', maxHeight: '78vh', overflowY: 'auto',
-            borderRadius: 14, border: `1px solid ${ac}35`,
-            background: 'linear-gradient(180deg, rgba(13,22,38,0.98), rgba(6,10,18,0.98))',
-            boxShadow: `0 24px 80px rgba(0,0,0,0.45), 0 0 30px ${glow}`,
-            padding: 18,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 }}>
-              <div>
-                <div style={{ color: '#e8edf8', fontSize: 18, fontWeight: 800 }}>{profilesLabel}</div>
-                <div style={{ color: '#66728d', fontSize: 12, marginTop: 3 }}>
-                  {isHe ? '\u05d4\u05d3\u05de\u05d5\u05d9\u05d5\u05ea \u05e9\u05de\u05d0\u05d9\u05d4 \u05d6\u05d9\u05d4\u05ea\u05d4 \u05de\u05ea\u05d5\u05da \u05d4\u05e9\u05d9\u05d7\u05d4' : 'People Maya has recognized from the conversation'}
-                </div>
-              </div>
-              <button onClick={() => setShowProfiles(false)} style={{
-                width: 34, height: 34, borderRadius: 10,
-                border: '1px solid #2a3348', background: 'rgba(255,255,255,0.04)',
-                color: '#9aa6bd', cursor: 'pointer', fontSize: 18,
-              }} aria-label={isHe ? '\u05e1\u05d2\u05d5\u05e8' : 'Close'}>x</button>
-            </div>
-
-            {profiles.length === 0 ? (
-              <div style={{
-                padding: '22px 16px', borderRadius: 12,
-                border: '1px solid rgba(255,255,255,0.08)',
-                background: 'rgba(255,255,255,0.035)',
-                color: '#95a1ba', lineHeight: 1.7, fontSize: 14,
-              }}>
-                {isHe
-                  ? '\u05e2\u05d3\u05d9\u05d9\u05df \u05d0\u05d9\u05df \u05e4\u05e8\u05d5\u05e4\u05d9\u05dc\u05d9\u05dd. \u05db\u05e9\u05ea\u05d3\u05d1\u05e8\u05d5 \u05e2\u05dc \u05d0\u05d3\u05dd \u05de\u05e1\u05d5\u05d9\u05dd, \u05de\u05d0\u05d9\u05d4 \u05ea\u05ea\u05d7\u05d9\u05dc \u05dc\u05d1\u05e0\u05d5\u05ea \u05dc\u05d5 \u05ea\u05de\u05d5\u05e0\u05d4 \u05de\u05ea\u05de\u05e9\u05db\u05ea.'
-                  : 'No profiles yet. When you discuss a specific person, Maya will start building a continuing picture for them.'}
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gap: 10 }}>
-                {profiles.map(profile => (
-                  <div key={profile.name} style={{
-                    padding: 14, borderRadius: 12,
-                    border: `1px solid ${ac}22`,
-                    background: 'rgba(255,255,255,0.045)',
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
-                      <div style={{ color: '#edf3ff', fontSize: 16, fontWeight: 800 }}>{profile.name}</div>
-                      <div style={{ color: ac, fontSize: 12, fontWeight: 700 }}>{profile.role || (isHe ? '\u05d9\u05dc\u05d3/\u05d4' : 'child')}</div>
-                    </div>
-                    <ProfileField label={isHe ? '\u05d0\u05ea\u05d2\u05e8\u05d9\u05dd' : 'Challenges'} items={profile.challenges} />
-                    <ProfileField label={isHe ? '\u05d8\u05e8\u05d9\u05d2\u05e8\u05d9\u05dd' : 'Triggers'} items={profile.triggers} />
-                    <ProfileField label={isHe ? '\u05de\u05d4 \u05e2\u05d5\u05d1\u05d3' : 'What works'} items={profile.whatWorks} />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* ── AVATAR CONFERENCE VIEW ── */}
       <div style={{
