@@ -48,8 +48,7 @@ export async function elevenLabsSpeak(text, voiceId) {
   }
 }
 
-export async function playElevenLabsStreamInput(text, voiceId, onStart, onEnd, options = {}) {
-  if (options.skipStream) return false;
+export async function playElevenLabsStreamInput(text, voiceId, onStart, onEnd) {
   if (!supportsProgressiveAudio()) return false;
 
   const controller = new AbortController();

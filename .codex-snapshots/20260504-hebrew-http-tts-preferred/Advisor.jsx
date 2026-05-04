@@ -178,8 +178,7 @@ export default function Advisor({ persona, lang, onBack }) {
         text,
         voiceId,
         () => { setSpeaking(true); setStatus(isHe ? 'מדבר...' : 'Speaking...'); },
-        () => { setSpeaking(false); setStatus(isHe ? 'מקשיב' : 'Listening'); inputRef.current?.focus(); },
-        { skipStream: isHe }
+        () => { setSpeaking(false); setStatus(isHe ? 'מקשיב' : 'Listening'); inputRef.current?.focus(); }
       ).then(played => {
         if (!played && speechRunRef.current === runId) playChunkedFallback();
       });
@@ -226,7 +225,7 @@ export default function Advisor({ persona, lang, onBack }) {
       const history = buildHistory(updated);
       const voiceId = persona ? (isHe ? persona.voiceIdHe : persona.voiceId) : null;
 
-      if (voiceOn && voiceId && !isHe) {
+      if (voiceOn && voiceId) {
         const streamId = `stream_${Date.now()}`;
         setMsgs(p => [...p, { role: 'advisor', text: '', streamId }]);
         setBusy(false);
