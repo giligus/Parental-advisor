@@ -42,10 +42,6 @@ function looksHebrew(text = '') {
   return /[\u0590-\u05FF]/.test(text);
 }
 
-function supportsElevenLanguageCode(modelId = '') {
-  return /eleven_v3/i.test(modelId);
-}
-
 function splitTextForStreaming(text = '') {
   const cleaned = String(text).replace(/\s+/g, ' ').trim();
   if (!cleaned) return [];
@@ -181,7 +177,7 @@ function createElevenStream({ textHint, voiceId, outputFormat = ELEVENLABS_OUTPU
   const languageCode = isHebrew ? 'he' : 'en';
   const url = new URL(`wss://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream-input`);
   url.searchParams.set('model_id', modelId);
-  if (supportsElevenLanguageCode(modelId)) url.searchParams.set('language_code', languageCode);
+  url.searchParams.set('language_code', languageCode);
   url.searchParams.set('output_format', outputFormat);
   url.searchParams.set('auto_mode', 'true');
   url.searchParams.set('sync_alignment', 'false');
@@ -533,7 +529,7 @@ app.post('/api/tts', async (req, res) => {
       body: JSON.stringify({
         text,
         model_id: modelId,
-        ...(supportsElevenLanguageCode(modelId) ? { language_code: languageCode } : {}),
+        language_code: languageCode,
         apply_text_normalization: 'auto',
         voice_settings: {
           stability: isHebrew ? 0.38 : 0.5,
@@ -586,7 +582,7 @@ app.post('/api/tts-stream-input', async (req, res) => {
   const languageCode = isHebrew ? 'he' : 'en';
   const url = new URL(`wss://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}/stream-input`);
   url.searchParams.set('model_id', modelId);
-  if (supportsElevenLanguageCode(modelId)) url.searchParams.set('language_code', languageCode);
+  url.searchParams.set('language_code', languageCode);
   url.searchParams.set('output_format', ELEVENLABS_OUTPUT_FORMAT);
   url.searchParams.set('auto_mode', 'true');
   url.searchParams.set('sync_alignment', 'false');
