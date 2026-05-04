@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Waveform from './Waveform';
-import { callLLM, callLLMVoiceStream, elevenLabsSpeak, webSpeechSpeak, stopSpeech, playAudioBase64, playElevenLabsStreamInput, buildHistory, getSpeechRecognition, isSpeechInputSupported, isRecordedSpeechSupported, transcribeAudioBlob, unlockAudio } from './api';
+import { callLLM, callLLMVoiceStream, elevenLabsSpeak, webSpeechSpeak, stopSpeech, playAudioBase64, playElevenLabsStreamInput, buildHistory, getSpeechRecognition, isSpeechInputSupported, isRecordedSpeechSupported, transcribeAudioBlob } from './api';
 import { loadAdvisorCase, prepareAdvisorTurn, saveAdvisorCase } from './advisorBrain';
 
 function ProfileField({ label, items }) {
@@ -99,12 +99,6 @@ export default function Advisor({ persona, lang, onBack }) {
         ? 'אתה יועץ התנהגותי. עברית טבעית, חמה. 2-4 משפטים. ללא markdown.'
         : 'Expert behavioral advisor. Natural warm English. Default to 1-2 short sentences. No markdown.');
   const greetingSystem = `${SYS}\nDefault to 1-2 short sentences. ${isHe ? 'Reply in Hebrew.' : ''}`;
-
-  const primeAudio = useCallback(() => {
-    unlockAudio().catch(error => {
-      console.warn('Audio unlock failed:', error);
-    });
-  }, []);
 
   const playBrowserSpeech = useCallback((text, final = true) => new Promise(resolve => {
     webSpeechSpeak(text, lang,
@@ -217,7 +211,6 @@ export default function Advisor({ persona, lang, onBack }) {
   }, [msgs, busy]);
 
   const send = useCallback(async (overrideText = '') => {
-    primeAudio();
     const m = (typeof overrideText === 'string' && overrideText ? overrideText : input).trim();
     if (!m || busy) return;
     setInput('');
@@ -276,7 +269,7 @@ export default function Advisor({ persona, lang, onBack }) {
       setBusy(false);
       setStatus(isHe ? 'מקשיב' : 'Listening');
     }
-  }, [input, msgs, busy, doSpeak, isHe, caseData, lang, persona, primeAudio]);
+  }, [input, msgs, busy, doSpeak, isHe, caseData, lang, persona]);
 
   const cleanupRecording = useCallback(() => {
     if (recordTimerRef.current) {
@@ -481,7 +474,6 @@ export default function Advisor({ persona, lang, onBack }) {
   }, [cleanupRecording, isHe, lang, send]);
 
   const toggleListening = useCallback(() => {
-    primeAudio();
     if (busy) return;
     if (listening) {
       stopListening();
@@ -491,7 +483,7 @@ export default function Advisor({ persona, lang, onBack }) {
     stopSpeech();
     if (isRecordedSpeechSupported()) startRecordedTranscription();
     else startBrowserRecognition();
-  }, [busy, listening, stopListening, startBrowserRecognition, startRecordedTranscription, primeAudio]);
+  }, [busy, listening, stopListening, startBrowserRecognition, startRecordedTranscription]);
 
   useEffect(() => () => {
     recognitionRef.current?.stop();
@@ -500,7 +492,6 @@ export default function Advisor({ persona, lang, onBack }) {
   }, [cleanupRecording]);
 
   const toggleVoice = () => {
-    primeAudio();
     setVoiceOn(v => !v);
     if (voiceOn) {
       speechRunRef.current += 1;
@@ -515,7 +506,7 @@ export default function Advisor({ persona, lang, onBack }) {
     : ['There was another meltdown today', 'The advance warning worked!', 'Sibling issues again'];
 
   return (
-    <div onPointerDownCapture={primeAudio} onTouchStart={primeAudio} style={{
+    <div style={{
       height: '100%',
       paddingTop: 'var(--sat)',
       paddingBottom: 'var(--sab)',

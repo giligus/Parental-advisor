@@ -2,32 +2,6 @@ let currentAudio = null;
 let currentSource = null;
 let currentAudioContext = null;
 let currentStreamAbort = null;
-let audioUnlocked = false;
-
-function getAudioContext() {
-  if (typeof window === 'undefined') return null;
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  if (!AudioCtx) return null;
-
-  if (!currentAudioContext || currentAudioContext.state === 'closed') {
-    currentAudioContext = new AudioCtx();
-  }
-  return currentAudioContext;
-}
-
-export async function unlockAudio() {
-  const ctx = getAudioContext();
-  if (!ctx) return false;
-
-  if (ctx.state === 'suspended') await ctx.resume();
-  const buffer = ctx.createBuffer(1, 1, 22050);
-  const source = ctx.createBufferSource();
-  source.buffer = buffer;
-  source.connect(ctx.destination);
-  source.start(0);
-  audioUnlocked = true;
-  return true;
-}
 
 // ── LLM via server proxy ─────────────────────────────
 export async function callLLM(system, messages) {
@@ -254,9 +228,10 @@ async function readError(response) {
 }
 
 function createPcmPlayer(sampleRate, onStart) {
-  const ctx = getAudioContext();
-  if (!ctx) throw new Error('AudioContext unavailable');
-  if (ctx.state === 'suspended') ctx.resume();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AudioCtx();
+  currentAudioContext?.close();
+  currentAudioContext = ctx;
 
   let nextTime = ctx.currentTime + 0.03;
   let started = false;
@@ -290,6 +265,8 @@ function createPcmPlayer(sampleRate, onStart) {
       const delay = Math.max(80, (nextTime - ctx.currentTime) * 1000 + 80);
       finishTimer = setTimeout(() => {
         currentSource = null;
+        currentAudioContext = null;
+        ctx.close();
         onEnd?.();
       }, delay);
     },
@@ -299,6 +276,8 @@ function createPcmPlayer(sampleRate, onStart) {
         currentSource?.stop();
       } catch {}
       currentSource = null;
+      currentAudioContext = null;
+      ctx.close();
     },
   };
 }
@@ -372,10 +351,8 @@ export function stopSpeech() {
     currentSource?.stop();
   } catch {}
   currentSource = null;
-  if (!audioUnlocked) {
-    currentAudioContext?.close();
-    currentAudioContext = null;
-  }
+  currentAudioContext?.close();
+  currentAudioContext = null;
 }
 
 export async function transcribeAudioBlob(blob, lang) {
@@ -428,17 +405,19 @@ export async function playAudioBase64(base64, onStart, onEnd) {
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    const ctx = getAudioContext();
-    if (!ctx) throw new Error('AudioContext unavailable');
-    if (ctx.state === 'suspended') await ctx.resume();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const buffer = await ctx.decodeAudioData(bytes.buffer);
     const source = ctx.createBufferSource();
+    currentAudioContext?.close();
+    currentAudioContext = ctx;
     currentSource = source;
     source.buffer = buffer;
     source.connect(ctx.destination);
     source.onended = () => {
       currentSource = null;
+      currentAudioContext = null;
       onEnd?.();
+      ctx.close();
     };
     onStart?.();
     source.start(0);
