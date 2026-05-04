@@ -75,6 +75,14 @@ export function stopSpeech() {
   window.speechSynthesis?.cancel();
 }
 
+export function getSpeechRecognition() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+export function isSpeechInputSupported() {
+  return Boolean(getSpeechRecognition());
+}
+
 // ── Play ElevenLabs audio buffer ───────────────────────
 export async function playAudioBase64(base64, onStart, onEnd) {
   try {

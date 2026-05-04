@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Waveform from './Waveform';
-import { callLLM, elevenLabsSpeak, webSpeechSpeak, stopSpeech, playAudioBase64, buildHistory } from './api';
+import { callLLM, elevenLabsSpeak, webSpeechSpeak, stopSpeech, playAudioBase64, buildHistory, getSpeechRecognition, isSpeechInputSupported } from './api';
 import { loadAdvisorCase, prepareAdvisorTurn, saveAdvisorCase } from './advisorBrain';
 
 export default function Advisor({ persona, lang, onBack }) {
@@ -9,10 +9,12 @@ export default function Advisor({ persona, lang, onBack }) {
   const [busy, setBusy] = useState(false);
   const [voiceOn, setVoiceOn] = useState(true);
   const [speaking, setSpeaking] = useState(false);
+  const [listening, setListening] = useState(false);
   const [status, setStatus] = useState(lang === 'he' ? 'מקשיב' : 'Listening');
   const [caseData, setCaseData] = useState(() => loadAdvisorCase());
   const chatRef = useRef(null);
   const inputRef = useRef(null);
+  const recognitionRef = useRef(null);
 
   const isHe = lang === 'he';
   const ac = persona?.accent || '#4b9cf3';
@@ -85,8 +87,8 @@ export default function Advisor({ persona, lang, onBack }) {
     if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
   }, [msgs, busy]);
 
-  const send = useCallback(async () => {
-    const m = input.trim();
+  const send = useCallback(async (overrideText = '') => {
+    const m = (typeof overrideText === 'string' && overrideText ? overrideText : input).trim();
     if (!m || busy) return;
     setInput('');
     const updated = [...msgs, { role: 'user', text: m }];
@@ -113,6 +115,73 @@ export default function Advisor({ persona, lang, onBack }) {
       setStatus(isHe ? 'מקשיב' : 'Listening');
     }
   }, [input, msgs, busy, doSpeak, isHe, caseData, lang, persona]);
+
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setListening(false);
+    setStatus(isHe ? 'מקשיב' : 'Listening');
+  }, [isHe]);
+
+  const toggleListening = useCallback(() => {
+    if (busy) return;
+    if (listening) {
+      stopListening();
+      return;
+    }
+
+    const SpeechRecognition = getSpeechRecognition();
+    if (!SpeechRecognition) {
+      setStatus(isHe ? 'אין תמיכה במיקרופון' : 'Mic unsupported');
+      return;
+    }
+
+    stopSpeech();
+    let spoken = '';
+    const recognition = new SpeechRecognition();
+    recognition.lang = isHe ? 'he-IL' : 'en-US';
+    recognition.interimResults = true;
+    recognition.continuous = false;
+
+    recognition.onstart = () => {
+      setListening(true);
+      setStatus(isHe ? 'מקשיבה לך...' : 'Listening to you...');
+    };
+
+    recognition.onresult = event => {
+      let finalText = '';
+      let interimText = '';
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const transcript = event.results[i][0]?.transcript || '';
+        if (event.results[i].isFinal) finalText += transcript;
+        else interimText += transcript;
+      }
+      spoken = (finalText || interimText || spoken).trim();
+      if (spoken) setInput(spoken);
+    };
+
+    recognition.onerror = event => {
+      console.warn('Speech recognition failed:', event?.error || event);
+      setListening(false);
+      setStatus(isHe ? 'לא שמעתי ברור' : 'Could not hear clearly');
+      inputRef.current?.focus();
+    };
+
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      setListening(false);
+      setStatus(isHe ? 'מקשיב' : 'Listening');
+      if (spoken.trim()) send(spoken.trim());
+      else inputRef.current?.focus();
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, [busy, listening, stopListening, isHe, send]);
+
+  useEffect(() => () => {
+    recognitionRef.current?.stop();
+  }, []);
 
   const toggleVoice = () => {
     setVoiceOn(v => !v);
@@ -346,8 +415,8 @@ export default function Advisor({ persona, lang, onBack }) {
             <input ref={inputRef} value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }}}
-              placeholder={isHe ? 'ספרו מה קורה...' : 'Tell me what happened...'}
-              disabled={busy}
+              placeholder={listening ? (isHe ? 'אני מקשיבה...' : 'Listening...') : (isHe ? 'ספרו מה קורה...' : 'Tell me what happened...')}
+              disabled={busy || listening}
               style={{
                 flex: 1, padding: '10px 14px', borderRadius: 12,
                 border: `1px solid ${ac}25`, background: 'rgba(255,255,255,0.05)',
@@ -357,6 +426,20 @@ export default function Advisor({ persona, lang, onBack }) {
                 backdropFilter: 'blur(8px)',
               }}
             />
+            {isSpeechInputSupported() && (
+              <button onClick={toggleListening} disabled={busy} style={{
+                width: 42, height: 42, borderRadius: 12,
+                border: `1px solid ${listening ? '#ef4444' : ac + '35'}`,
+                background: listening ? '#ef444422' : 'rgba(255,255,255,0.05)',
+                color: listening ? '#ef4444' : ac,
+                cursor: busy ? 'default' : 'pointer',
+                fontWeight: 800, fontSize: 15, fontFamily: 'inherit',
+                opacity: busy ? 0.45 : 1, flexShrink: 0,
+                boxShadow: listening ? '0 0 22px rgba(239,68,68,0.28)' : 'none',
+              }} title={isHe ? 'דברו אל מאיה' : 'Speak to Maya'}>
+                {listening ? '■' : '●'}
+              </button>
+            )}
             <button onClick={send} disabled={busy || !input.trim()} style={{
               padding: '10px 18px', borderRadius: 12, border: 'none',
               background: busy ? 'rgba(255,255,255,0.06)' : ac,
