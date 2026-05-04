@@ -21,6 +21,8 @@ const PROVIDER      = (process.env.LLM_PROVIDER || 'anthropic').toLowerCase();
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
 const OPENAI_KEY    = process.env.OPENAI_API_KEY    || '';
 const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || '';
+const ELEVENLABS_MODEL = process.env.ELEVENLABS_MODEL || 'eleven_flash_v2_5';
+const ELEVENLABS_MODEL_HE = process.env.ELEVENLABS_MODEL_HE || 'eleven_v3';
 
 // Model selection — can override via env
 const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
@@ -29,6 +31,10 @@ const OPENAI_MODEL    = process.env.OPENAI_MODEL    || 'gpt-4.1-mini';
 
 console.log(`[server] Provider: ${PROVIDER}`);
 console.log(`[server] Model: ${PROVIDER === 'anthropic' ? ANTHROPIC_MODEL : OPENAI_MODEL}`);
+
+function looksHebrew(text = '') {
+  return /[\u0590-\u05FF]/.test(text);
+}
 
 // ── Anthropic call ────────────────────────────────────
 async function callAnthropic(system, messages, maxTokens) {
@@ -133,6 +139,9 @@ app.post('/api/tts', async (req, res) => {
   }
 
   try {
+    const isHebrew = looksHebrew(text);
+    const modelId = isHebrew ? ELEVENLABS_MODEL_HE : ELEVENLABS_MODEL;
+    const languageCode = isHebrew ? 'he' : 'en';
     const eleven = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/with-timestamps`, {
       method: 'POST',
       headers: {
@@ -141,11 +150,14 @@ app.post('/api/tts', async (req, res) => {
       },
       body: JSON.stringify({
         text,
-        model_id: 'eleven_flash_v2_5',
+        model_id: modelId,
+        language_code: languageCode,
+        apply_text_normalization: 'auto',
         voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
-          style: 0.3,
+          stability: isHebrew ? 0.38 : 0.5,
+          similarity_boost: 0.82,
+          style: isHebrew ? 0.45 : 0.3,
+          use_speaker_boost: true,
         },
       }),
     });
@@ -154,10 +166,12 @@ app.post('/api/tts', async (req, res) => {
     if (!eleven.ok) {
       return res.status(eleven.status).json({
         error: data?.detail?.message || data?.message || 'ElevenLabs API error',
+        model: modelId,
+        languageCode,
       });
     }
 
-    return res.json(data);
+    return res.json({ ...data, model: modelId, languageCode });
   } catch (err) {
     console.error('[/api/tts] ElevenLabs error:', err.message);
     return res.status(500).json({ error: 'ElevenLabs proxy failed' });
@@ -171,6 +185,8 @@ app.get('/api/config', (req, res) => {
     model: PROVIDER === 'openai' ? OPENAI_MODEL : ANTHROPIC_MODEL,
     hasKey: PROVIDER === 'openai' ? !!OPENAI_KEY : !!ANTHROPIC_KEY,
     hasTtsKey: !!ELEVENLABS_KEY,
+    ttsModel: ELEVENLABS_MODEL,
+    ttsModelHe: ELEVENLABS_MODEL_HE,
   });
 });
 
