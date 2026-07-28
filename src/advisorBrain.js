@@ -24,7 +24,7 @@ function profileId(name = '') {
 function cleanName(value = '') {
   const cleaned = value.replace(/[?.!,״"]/g, '').replace(/\s+/g, ' ').trim();
   if (!cleaned || cleaned.length > 28) return null;
-  if (/^(הוא|היא|אני|אנחנו|אתם|אתן|ילד|ילדה|בן|בת|שלו|שלה|אמר|אמרה|כי|שוב|היום|אתמול|he|she|they|child|said)$/i.test(cleaned)) return null;
+  if (/^(הוא|היא|אני|אנחנו|אתם|אתן|ילד|ילדה|בן|בת|שלו|שלה|אמר|אמרה|כי|שוב|היום|אתמול|או|ו|של|עם|בין|לפעמים|היי|שלום|הגדול|הגדולה|הקטן|הקטנה|he|she|they|child|said|or|and|with|between|oldest|youngest)$/i.test(cleaned)) return null;
   if (/(מסך|פיצוץ|ריב|בעיה|הצק|מציק|צעק|בכה|screen|problem|meltdown)/i.test(cleaned)) return null;
   return cleaned;
 }
@@ -40,7 +40,7 @@ function detectConcern(text, lang) {
   return found ? { id: found.id, label: lang === 'he' ? found.he : found.en } : null;
 }
 
-function extractPeople(text) {
+function extractPeople(text, recentMessages = []) {
   const candidates = [];
   const patterns = [
     { role: 'child', confidence: 0.96, re: /(?:הבן שלי|הבת שלי|בני|בתי|my son|my daughter)\s+([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})/giu },
@@ -48,6 +48,10 @@ function extractPeople(text) {
     { role: 'parent', confidence: 0.96, re: /(?:אשתי|בעלי|בן זוגי|בת זוגי|my wife|my husband|my partner)\s+([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})/giu },
     { role: 'parent', confidence: 0.94, re: /([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})\s*,?\s*(?:אשתי|בעלי|בן זוגי|בת זוגי|my wife|my husband|my partner)/giu },
     { role: 'professional', confidence: 0.94, re: /(?:המורה|הגננת|הסייעת|המטפלת|המטפל|teacher|therapist)\s+([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})/giu },
+    { role: 'unknown', confidence: 0.88, nameGroups: [1, 2], re: /(?:בין|between)\s+([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})\s+(?:ו|לבין|and)\s*([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})/giu },
+    { role: 'unknown', confidence: 0.84, nameGroups: [1, 2], re: /([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})\s+ו([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})\s+(?:רבים|רבות|מתווכחים|מתווכחות|מתקוטטים|נלחמים|fight|argue)/giu },
+    { role: 'child', confidence: 0.92, ageGroup: 2, re: /(?:לא[,\s]+)?([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})\s+(?:הוא|היא)\s+(?:הגדול|הגדולה|הקטן|הקטנה|בן|בת)(?:\s+(?:בן|בת))?\s*(\d+(?:[.,]\d+)?)?/giu },
+    { role: 'child', confidence: 0.9, ageGroup: 2, re: /([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})\s+(?:בן|בת)\s+(\d+(?:[.,]\d+)?)/giu },
     { role: 'unknown', confidence: 0.86, re: /(?:קוראים לו|קוראים לה|בשם|שמו|שמה|named)\s+([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})/giu },
     { role: 'unknown', confidence: 0.82, re: /(?:ביקשנו מ|אמרנו ל|נתנו ל|שאלנו את|asked |told )([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})/giu },
     { role: 'child', confidence: 0.74, re: /(?:אמר|אמרה|דיווח|דיווחה)\s+ש([\u0590-\u05FF][\u0590-\u05FF'-]{1,22})\s+(?:מציק|מציקה|צורח|צועק|בוכה|מרביץ|דוחף)/giu },
@@ -56,18 +60,45 @@ function extractPeople(text) {
     { role: 'unknown', confidence: 0.78, re: /(?:^|[.!?]\s*)([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})\s+(?:מציק|מציקה|צורח|צורחת|צועק|צועקת|בוכה|מרביץ|מרביצה|דוחף|דוחפת|מסרב|מסרבת|מחזיק|מחזיקה|refuses|screams|bothers|hits|pushes|holds|is holding)/giu },
   ];
 
-  for (const { role, confidence, re } of patterns) {
+  for (const { role, confidence, re, nameGroups = [1], ageGroup = null } of patterns) {
     for (const match of text.matchAll(re)) {
-      const name = cleanName(match[1]);
-      if (name) candidates.push({ name, role, confidence });
+      const parsedAge = ageGroup && match[ageGroup]
+        ? Number(match[ageGroup].replace(',', '.'))
+        : null;
+      for (const group of nameGroups) {
+        const name = cleanName(match[group]);
+        if (name) candidates.push({
+          name,
+          role,
+          confidence,
+          age: Number.isFinite(parsedAge) ? parsedAge : null,
+        });
+      }
     }
+  }
+
+  const previousAdvisorMessage = [...recentMessages]
+    .reverse()
+    .find(message => message?.role === 'advisor' || message?.role === 'assistant');
+  const askedForPerson = previousAdvisorMessage
+    && /(מי|איזה מהם|איזו מהן|מה השם|מי משניהם|מי משתיהן|who|which one|what(?:'s| is) (?:his|her|their) name)/i.test(previousAdvisorMessage.text || previousAdvisorMessage.content || '');
+  if (askedForPerson && /^[\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22}$/u.test(text.trim())) {
+    const name = cleanName(text);
+    if (name) candidates.push({ name, role: 'unknown', confidence: 0.72, age: null });
   }
 
   const people = new Map();
   for (const candidate of candidates) {
     const id = profileId(candidate.name);
     const existing = people.get(id);
-    if (!existing || candidate.confidence > existing.confidence) people.set(id, candidate);
+    if (!existing) {
+      people.set(id, candidate);
+      continue;
+    }
+    people.set(id, {
+      ...(candidate.confidence > existing.confidence ? candidate : existing),
+      age: candidate.age ?? existing.age ?? null,
+    });
   }
   return [...people.values()];
 }
@@ -238,7 +269,7 @@ function mergeProfile(existing, person, lang, concern, sourceMessageId) {
     role: old.role && old.role !== 'unknown' ? old.role : person.role,
     confidence: Math.max(old.confidence || 0, person.confidence || 0),
     status: old.status || 'provisional',
-    age: old.age || null,
+    age: person.age ?? old.age ?? null,
     challenges: unique([...(old.challenges || []), concern?.label]).slice(0, 8),
     strengths: old.strengths || [],
     triggers: unique([...(old.triggers || []), concern?.label]).slice(0, 8),
@@ -329,10 +360,10 @@ function storeEligibleInsight(caseData, synthesis) {
   };
 }
 
-export function prepareAdvisorTurn({ message, caseData, lang, persona }) {
+export function prepareAdvisorTurn({ message, caseData, lang, persona, conversation = [] }) {
   const sourceMessageId = newId('m_');
   const concern = detectConcern(message, lang);
-  const people = extractPeople(message);
+  const people = extractPeople(message, conversation);
   const safety = assessSafety(message);
   const extractedEvent = extractEvent(message, sourceMessageId);
   const eventDraft = extractedEvent || (safety.requiresOverride ? {

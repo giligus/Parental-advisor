@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node server.js --dev",
     "build": "vite build",
+    "test": "node --test tests/*.test.js",
     "preview": "vite preview",
     "start": "node server.js"
   },

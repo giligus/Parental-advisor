@@ -269,7 +269,13 @@ export default function Advisor({ persona, lang, onBack }) {
     setBusy(true);
     setStatus(isHe ? 'חושב...' : 'Thinking...');
     try {
-      const turn = prepareAdvisorTurn({ message: m, caseData, lang, persona });
+      const turn = prepareAdvisorTurn({
+        message: m,
+        caseData,
+        lang,
+        persona,
+        conversation: msgs.slice(-8),
+      });
       const commitTurn = () => {
         setCaseData(turn.caseData);
         saveAdvisorCase(turn.caseData);
