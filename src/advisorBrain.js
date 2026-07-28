@@ -153,6 +153,7 @@ function routeMessage(text, event, contextSufficient, safety, people = []) {
   const trimmed = text.trim();
   if (safety.requiresOverride) return 'safety';
   if (/^(שלום|היי|הי|אהלן|hi|hello)$/i.test(trimmed)) return 'greeting';
+  if (/(זוכר|זוכרת|זכרון|זיכרון|השיחה האחרונה|דיברנו קודם|דיברנו בפעם|מה אתה יודע על|מה את יודעת על|remember|last conversation|talked about before|what do you know about)/i.test(trimmed)) return 'memory_recall';
   if (/(תמונה כוללת|תמונת מצב|סיכום|מה המצב|big picture|status|summary|weekly)/i.test(trimmed)) return 'big_picture';
   if (/(תרגול|סימולציה|נשחק|roleplay|practice|simulation)/i.test(trimmed)) return 'simulation';
   if (/(מה לעשות|איך להגיב|תוכנית|צעדים|what should|plan|how should)/i.test(trimmed)) return 'action_plan';
@@ -308,6 +309,7 @@ function createResponseContract(route) {
   const contracts = {
     greeting: { advisorDepth: 'none', memoryScope: 'none', maxClarifyingQuestions: 1, empathyFirst: true, showBigPicture: false, personaMode: 'listener', avatarPresence: 'compact', responseLength: 'short' },
     open: { advisorDepth: 'none', memoryScope: 'light', maxClarifyingQuestions: 1, empathyFirst: true, showBigPicture: false, personaMode: 'listener', avatarPresence: 'compact', responseLength: 'short' },
+    memory_recall: { advisorDepth: 'low', memoryScope: 'full_case', maxClarifyingQuestions: 0, empathyFirst: true, showBigPicture: false, personaMode: 'listener', avatarPresence: 'compact', responseLength: 'short' },
     topic_intake: { advisorDepth: 'low', memoryScope: 'relevant_profile', maxClarifyingQuestions: 1, empathyFirst: true, showBigPicture: false, personaMode: 'listener', avatarPresence: 'compact', responseLength: 'short' },
     event_intake: { advisorDepth: 'low', memoryScope: 'working_only', maxClarifyingQuestions: 1, empathyFirst: true, showBigPicture: false, personaMode: 'listener', avatarPresence: 'compact', responseLength: 'short' },
     event: { advisorDepth: 'medium', memoryScope: 'relevant_case_slice', maxClarifyingQuestions: 1, empathyFirst: true, showBigPicture: false, personaMode: 'listener_to_analyst', avatarPresence: 'compact', responseLength: 'short' },
@@ -321,7 +323,7 @@ function createResponseContract(route) {
 }
 
 function createSynthesis({ route, event, state, policy, safety }) {
-  if (['greeting', 'open', 'topic_intake', 'event_intake'].includes(route)) return null;
+  if (['greeting', 'open', 'topic_intake', 'event_intake', 'memory_recall'].includes(route)) return null;
   const leadingHypothesis = state.hypotheses?.[0] || null;
   return {
     advisorMode: policy.mode,
@@ -431,6 +433,13 @@ function buildSystemPrompt({ lang, persona, caseData, route, event, policy, acti
   const profiles = Object.values(caseData.profiles || {});
   const recentEvents = (caseData.events || []).slice(-5);
   const focus = caseData.activeFocus;
+  const hasCaseMemory = Boolean(profiles.length || recentEvents.length || caseData.insights?.length || focus);
+  const memoryStatusHe = hasCaseMemory
+    ? `יש זיכרון מובנה מהתיק: ${profiles.length ? `אנשים מוכרים - ${profiles.map(item => item.name).join(', ')}` : 'אין עדיין שמות שמורים'}; מוקד אחרון - ${focus?.label || 'לא הוגדר'}; אירועים שמורים - ${recentEvents.length}.`
+    : 'אין עדיין זיכרון מובנה מהתיק.';
+  const memoryStatusEn = hasCaseMemory
+    ? `Structured case memory is available: ${profiles.length ? `known people - ${profiles.map(item => item.name).join(', ')}` : 'no saved names yet'}; last focus - ${focus?.label || 'not set'}; saved events - ${recentEvents.length}.`
+    : 'No structured case memory is available yet.';
 
   if (he) {
     return `את ${name}, יועצת הורית והתנהגותית מתמשכת. את מדברת בעברית טבעית, חמה וישירה, כמו יועצת אנושית שמכירה את התיק אבל לא נשמעת כמו מערכת.
@@ -445,10 +454,11 @@ function buildSystemPrompt({ lang, persona, caseData, route, event, policy, acti
 כיוון ייעוצי פנימי: מטרה - ${policy.objective}; דרך - ${policy.strategy}; להימנע מ - ${policy.avoid}
 סינתזה פנימית: ${synthesis ? JSON.stringify(synthesis) : 'לא נדרשת בשלב הזה'}
 בטיחות: ${safety.class}. ${safety.requiresOverride ? 'עצרי ייעוץ רגיל, תני צעד בטיחותי מיידי והפניה לעזרה אנושית מתאימה בלי לקבוע אבחנה או אשמה.' : 'אין אות בטיחות מפורש בהודעה.'}
+מצב זיכרון: ${memoryStatusHe}
 תמונת תיק קצרה: ${recentEvents.length ? recentEvents.map(item => `${item.type}/${item.outcome}: ${item.raw}`).join(' | ') : 'עדיין אין מספיק היסטוריה'}
 פרופילים מוכרים: ${profiles.length ? profiles.map(item => `${item.name}: ${(item.challenges || []).join(', ') || 'אין עדיין מספיק מידע'}`).join(' | ') : 'אין עדיין פרופילים'}
 
-חשוב: השתמשי בהקשר הזה רק כדי להישמע רציפה וחכמה. אל תדווחי עליו כנתונים.`;
+חשוב: השתמשי בהקשר הזה כדי להישמע רציפה וחכמה. אם המשתמש שואל אם את זוכרת, עני בכנות מתוך הזיכרון המובנה ואל תגידי שאין לך זיכרון כאשר מצב הזיכרון אומר שיש. הסבירי בקצרה שאת זוכרת את עיקרי התיק ולא תמליל מלא. אל תקריאי JSON או שמות שדות פנימיים.`;
   }
 
   return `You are ${name}, a continuous parenting and behavioral advisor. Speak naturally, warmly, and directly, like a human advisor who knows the case without sounding like a system.
@@ -463,15 +473,17 @@ Current event: ${event ? `${event.raw} | direction: ${event.type} | outcome: ${e
 Internal advisory direction: objective - ${policy.objective}; strategy - ${policy.strategy}; avoid - ${policy.avoid}
 Internal synthesis: ${synthesis ? JSON.stringify(synthesis) : 'not required for this turn'}
 Safety: ${safety.class}. ${safety.requiresOverride ? 'Stop ordinary coaching and give an immediate safety-oriented next action and appropriate human escalation without asserting diagnosis or blame.' : 'No explicit safety signal in this message.'}
+Memory status: ${memoryStatusEn}
 Short case picture: ${recentEvents.length ? recentEvents.map(item => `${item.type}/${item.outcome}: ${item.raw}`).join(' | ') : 'not enough history yet'}
 Known profiles: ${profiles.length ? profiles.map(item => `${item.name}: ${(item.challenges || []).join(', ') || 'limited information'}`).join(' | ') : 'none yet'}
 
-Use this context only to sound continuous and intelligent. Do not report it as data.`;
+Use this context to sound continuous and intelligent. If the user asks whether you remember, answer truthfully from structured memory and never claim to have no memory when memory status says it exists. Briefly explain that you retain the case essentials rather than a full transcript. Never read out JSON or internal field names.`;
 }
 
 function responseGuideHe(route) {
   const map = {
     greeting: 'זו רק ברכה. עני קצר וחם, והזמיני בעדינות לספר במה להתמקד.',
+    memory_recall: 'המשתמש שואל על זיכרון קודם. עני ישירות מתוך תמונת התיק: אמרי בקצרה מה את זוכרת, וצייני שזה זיכרון של עיקרי התיק ולא תמליל מלא. אל תשאלי מחדש על מידע שכבר שמור.',
     topic_intake: 'המשתמש מסמן אדם או נושא. הכירי בזה ושאלי שאלה אחת שמקדמת הבנה, לא שאלה כללית מדי.',
     event_intake: 'זה דיווח חלקי על אירוע. תני תיקוף קצר ושאלי רק מה היה הרגע הראשון שבו התחיל להידרדר. אל תציגי עדיין דפוס או המלצה.',
     event: 'זה דיווח על אירוע. תני שיקוף קצר, חברי בעדינות לכיוון אפשרי, ושאלי רק פרט חסר אחד אם צריך.',
@@ -488,6 +500,7 @@ function responseGuideHe(route) {
 function responseGuideEn(route) {
   const map = {
     greeting: 'This is only a greeting. Reply briefly and warmly, then invite focus.',
+    memory_recall: 'The user is asking about prior memory. Answer directly from the case picture, briefly state what you remember, and clarify that it is a structured case summary rather than a full transcript. Do not ask again for information already stored.',
     topic_intake: 'The user is marking a person or topic. Acknowledge it and ask one useful next question.',
     event_intake: 'This is an incomplete event report. Briefly acknowledge it and ask only for the first moment when it began to shift. Do not present a pattern or recommendation yet.',
     event: 'This is an event report. Reflect briefly, connect gently to a possible direction, and ask only one missing detail if needed.',

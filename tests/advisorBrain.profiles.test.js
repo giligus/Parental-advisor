@@ -43,3 +43,22 @@ test('does not create a profile from a conjunction before a relationship word', 
   assert.equal(result.caseData.profiles['או'], undefined);
   assert.equal(Object.keys(result.caseData.profiles).length, 0);
 });
+
+test('routes a previous-conversation question through structured memory', () => {
+  const rememberedCase = turn('יש מכות בין איתמר ואריאל לפעמים').caseData;
+  const recall = turn('את זוכרת את השיחה האחרונה שלנו על איתמר ואריאל?', rememberedCase);
+
+  assert.equal(recall.route, 'memory_recall');
+  assert.equal(recall.responseContract.memoryScope, 'full_case');
+  assert.match(recall.system, /יש זיכרון מובנה מהתיק/);
+  assert.match(recall.system, /איתמר/);
+  assert.match(recall.system, /אריאל/);
+  assert.match(recall.system, /עיקרי התיק ולא תמליל מלא/);
+});
+
+test('does not invent memory when the case is empty', () => {
+  const recall = turn('את זוכרת את השיחה האחרונה שלנו?', emptyCase());
+
+  assert.equal(recall.route, 'memory_recall');
+  assert.match(recall.system, /אין עדיין זיכרון מובנה מהתיק/);
+});

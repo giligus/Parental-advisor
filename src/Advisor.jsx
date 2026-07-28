@@ -245,9 +245,20 @@ export default function Advisor({ persona, lang, onBack }) {
 
   // Greeting
   useEffect(() => {
+    const hasMemory = Boolean(
+      Object.keys(caseData.profiles || {}).length
+      || caseData.events?.length
+      || caseData.insights?.length
+      || caseData.activeFocus
+    );
+    const lastFocus = caseData.activeFocus?.label;
     const greeting = isHe
-      ? 'שלום, טוב שאתם כאן. במה תרצו להתמקד היום?'
-      : "Hi, it's good to have you here. What would you like to focus on today?";
+      ? hasMemory
+        ? `שלום, טוב שחזרתם. ${lastFocus ? `בפעם הקודמת עסקנו ב${lastFocus}. ` : ''}תרצו להמשיך משם או להתחיל בנושא חדש?`
+        : 'שלום, טוב שאתם כאן. במה תרצו להתמקד היום?'
+      : hasMemory
+        ? `Welcome back. ${lastFocus ? `Last time we focused on ${lastFocus}. ` : ''}Would you like to continue or start with something new?`
+        : "Hi, it's good to have you here. What would you like to focus on today?";
     setMsgs([{ role: 'advisor', text: greeting }]);
     setBusy(false);
     setConnectionState('idle');
