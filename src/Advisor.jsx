@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Waveform from './Waveform';
 import { callLLM, callLLMVoiceStream, elevenLabsSpeak, webSpeechSpeak, stopSpeech, playAudioBase64, playElevenLabsStreamInput, buildHistory, getSpeechRecognition, isSpeechInputSupported, isRecordedSpeechSupported, transcribeAudioBlob, unlockAudio } from './api';
-import { loadAdvisorCase, prepareAdvisorTurn, saveAdvisorCase } from './advisorBrain';
+import { clearAdvisorCase, loadAdvisorCase, prepareAdvisorTurn, saveAdvisorCase, serializeAdvisorCase } from './advisorBrain';
 
 function ProfileField({ label, items }) {
   const values = Array.isArray(items) ? items.filter(Boolean) : [];
@@ -73,6 +73,7 @@ export default function Advisor({ persona, lang, onBack }) {
   const [voiceIssue, setVoiceIssue] = useState('');
   const [showProfiles, setShowProfiles] = useState(false);
   const [status, setStatus] = useState(lang === 'he' ? 'מקשיב' : 'Listening');
+  const [connectionState, setConnectionState] = useState('idle');
   const [caseData, setCaseData] = useState(() => loadAdvisorCase());
   const chatRef = useRef(null);
   const inputRef = useRef(null);
@@ -88,17 +89,65 @@ export default function Advisor({ persona, lang, onBack }) {
   const isHe = lang === 'he';
   const ac = persona?.accent || '#4b9cf3';
   const glow = persona?.glow || 'rgba(75,156,243,0.4)';
-  const profiles = Object.values(caseData.profiles || {});
+  const profileEntries = Object.entries(caseData.profiles || {});
+  const profiles = profileEntries.map(([, profile]) => profile);
   const profilesLabel = isHe ? '\u05e4\u05e8\u05d5\u05e4\u05d9\u05dc\u05d9\u05dd' : 'Profiles';
 
-  const SYS = persona
-    ? (isHe
-        ? `אתה ${persona.name}, יועץ התנהגותי מומחה. עברית טבעית, חמה, ישירה. 2-4 משפטים. ללא markdown.`
-        : `You are ${persona.nameEn}, an expert behavioral advisor. Natural warm English. Default to 1-2 short sentences. No markdown.`)
-    : (isHe
-        ? 'אתה יועץ התנהגותי. עברית טבעית, חמה. 2-4 משפטים. ללא markdown.'
-        : 'Expert behavioral advisor. Natural warm English. Default to 1-2 short sentences. No markdown.');
-  const greetingSystem = `${SYS}\nDefault to 1-2 short sentences. ${isHe ? 'Reply in Hebrew.' : ''}`;
+  const roleLabels = isHe
+    ? { child: 'ילד/ה', parent: 'הורה / בן או בת זוג', professional: 'איש/ת מקצוע', unknown: 'לא ידוע' }
+    : { child: 'Child', parent: 'Parent / partner', professional: 'Professional', unknown: 'Unknown' };
+
+  const persistCase = useCallback(nextCase => {
+    setCaseData(nextCase);
+    saveAdvisorCase(nextCase);
+  }, []);
+
+  const updateProfile = useCallback((profileId, updates) => {
+    persistCase({
+      ...caseData,
+      profiles: {
+        ...(caseData.profiles || {}),
+        [profileId]: { ...caseData.profiles[profileId], ...updates, status: 'confirmed' },
+      },
+    });
+  }, [caseData, persistCase]);
+
+  const deleteProfile = useCallback(profileId => {
+    const profileName = caseData.profiles?.[profileId]?.name || '';
+    const prompt = isHe ? `למחוק את הפרופיל של ${profileName}?` : `Delete ${profileName}'s profile?`;
+    if (!window.confirm(prompt)) return;
+    const nextProfiles = { ...(caseData.profiles || {}) };
+    delete nextProfiles[profileId];
+    persistCase({
+      ...caseData,
+      profiles: nextProfiles,
+      activeProfileId: caseData.activeProfileId === profileId ? null : caseData.activeProfileId,
+    });
+  }, [caseData, isHe, persistCase]);
+
+  const exportMemory = useCallback(() => {
+    const blob = new Blob([serializeAdvisorCase(caseData)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `advisor-memory-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [caseData]);
+
+  const clearMemory = useCallback(() => {
+    const prompt = isHe
+      ? 'למחוק את כל הפרופילים, האירועים והתובנות שנשמרו במכשיר הזה?'
+      : 'Delete all profiles, events, and insights stored on this device?';
+    if (!window.confirm(prompt)) return;
+    setCaseData(clearAdvisorCase());
+  }, [isHe]);
+
+  const resetSession = useCallback(() => {
+    setMsgs(current => current.filter(message => message.role === 'advisor').slice(0, 1));
+    setInput('');
+    setShowProfiles(false);
+  }, []);
 
   const primeAudio = useCallback(() => {
     unlockAudio().catch(error => {
@@ -196,20 +245,14 @@ export default function Advisor({ persona, lang, onBack }) {
 
   // Greeting
   useEffect(() => {
-    setBusy(true);
-    setStatus(isHe ? 'חושב...' : 'Thinking...');
-    callLLM(greetingSystem, [{ role: 'user', content: isHe ? 'שלום, פתח שיחה חמה וקצרה' : 'Hello, open with a warm brief greeting' }])
-      .then(txt => {
-        setMsgs([{ role: 'advisor', text: txt }]);
-        setBusy(false);
-        setTimeout(() => doSpeak(txt), 300);
-      })
-      .catch(() => {
-        const fallback = isHe ? 'שלום! שמחה שאתם פה. מה מעסיק אתכם היום?' : "Hi! Glad you're here. What's on your mind?";
-        setMsgs([{ role: 'advisor', text: fallback }]);
-        setBusy(false);
-        setTimeout(() => doSpeak(fallback), 300);
-      });
+    const greeting = isHe
+      ? 'שלום, טוב שאתם כאן. במה תרצו להתמקד היום?'
+      : "Hi, it's good to have you here. What would you like to focus on today?";
+    setMsgs([{ role: 'advisor', text: greeting }]);
+    setBusy(false);
+    setConnectionState('idle');
+    setStatus(isHe ? 'מקשיבה' : 'Listening');
+    setTimeout(() => doSpeak(greeting), 250);
   }, []);
 
   useEffect(() => {
@@ -227,8 +270,10 @@ export default function Advisor({ persona, lang, onBack }) {
     setStatus(isHe ? 'חושב...' : 'Thinking...');
     try {
       const turn = prepareAdvisorTurn({ message: m, caseData, lang, persona });
-      setCaseData(turn.caseData);
-      saveAdvisorCase(turn.caseData);
+      const commitTurn = () => {
+        setCaseData(turn.caseData);
+        saveAdvisorCase(turn.caseData);
+      };
 
       const history = buildHistory(updated);
       const voiceId = persona ? (isHe ? persona.voiceIdHe : persona.voiceId) : null;
@@ -259,21 +304,28 @@ export default function Advisor({ persona, lang, onBack }) {
           const reply = streamed.text || await callLLM(turn.system, history);
           setMsgs(p => p.map(msg => msg.streamId === streamId ? { ...msg, text: reply } : msg));
           if (!streamed.text) doSpeak(reply);
+          commitTurn();
+          setConnectionState('ready');
+        } else {
+          commitTurn();
+          setConnectionState('ready');
         }
       } else {
         const reply = await callLLM(turn.system, history);
         setMsgs(p => [...p, { role: 'advisor', text: reply }]);
         setBusy(false);
+        commitTurn();
+        setConnectionState('ready');
         doSpeak(reply);
       }
     } catch (error) {
       console.error('Chat request failed:', error);
-      const detail = error?.message ? ` (${error.message})` : '';
       const err = isHe
-        ? `מצטערת, הייתה בעיה בחיבור ליועץ.${detail}`
-        : `Sorry, there was an issue connecting to the advisor.${detail}`;
+        ? 'החיבור ליועץ אינו זמין כרגע. נסו שוב בעוד רגע.'
+        : 'The advisor is temporarily unavailable. Please try again in a moment.';
       setMsgs(p => [...p, { role: 'advisor', text: err, isErr: true }]);
       setBusy(false);
+      setConnectionState('error');
       setStatus(isHe ? 'מקשיב' : 'Listening');
     }
   }, [input, msgs, busy, doSpeak, isHe, caseData, lang, persona, primeAudio]);
@@ -539,12 +591,18 @@ export default function Advisor({ persona, lang, onBack }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
           <div style={{
             width: 8, height: 8, borderRadius: '50%',
-            background: speaking ? '#ef4444' : ac,
-            boxShadow: `0 0 8px ${speaking ? '#ef4444' : ac}`,
+            background: speaking || connectionState === 'error' ? '#ef4444' : ac,
+            boxShadow: `0 0 8px ${speaking || connectionState === 'error' ? '#ef4444' : ac}`,
             animation: speaking ? 'livePulse .8s ease-in-out infinite' : 'none',
           }}/>
-          <span style={{ fontSize: 10, color: ac, fontWeight: 700, letterSpacing: 1.5 }}>
-            {speaking ? 'SPEAKING' : 'CONNECTED'}
+          <span style={{ fontSize: 10, color: connectionState === 'error' ? '#f87171' : ac, fontWeight: 700, letterSpacing: 1.5 }}>
+            {speaking
+              ? (isHe ? 'מדברת' : 'SPEAKING')
+              : connectionState === 'ready'
+                ? (isHe ? 'מחוברת' : 'CONNECTED')
+                : connectionState === 'error'
+                  ? (isHe ? 'לא מחוברת' : 'UNAVAILABLE')
+                  : (isHe ? 'מוכנה' : 'READY')}
           </span>
         </div>
 
@@ -564,7 +622,7 @@ export default function Advisor({ persona, lang, onBack }) {
             background: profiles.length ? ac + '16' : 'rgba(0,0,0,0.3)',
             color: profiles.length ? ac : '#4a5270',
             fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
-          }} title={profilesLabel}>
+          }} title={profilesLabel} aria-label={profilesLabel}>
             {profilesLabel}{profiles.length ? ` ${profiles.length}` : ''}
           </button>
           <button onClick={toggleVoice} style={{
@@ -573,10 +631,10 @@ export default function Advisor({ persona, lang, onBack }) {
             background: voiceOn ? ac + '22' : 'rgba(0,0,0,0.3)',
             color: voiceOn ? ac : '#4a5270',
             fontSize: 14, cursor: 'pointer', fontFamily: 'inherit',
-          }} title={isHe ? 'קול' : 'Voice'}>
+          }} title={isHe ? 'קול' : 'Voice'} aria-label={isHe ? 'הפעלת קול' : 'Voice playback'} aria-pressed={voiceOn}>
             {voiceOn ? '🔊' : '🔇'}
           </button>
-          <button onClick={onBack} style={{
+          <button onClick={onBack} aria-label={isHe ? 'החלפת יועץ' : 'Switch advisor'} style={{
             padding: '4px 10px', borderRadius: 7,
             border: '1px solid #252d3d', background: 'rgba(0,0,0,0.3)',
             color: '#4a5270', fontSize: 11, cursor: 'pointer', fontFamily: 'inherit',
@@ -585,6 +643,16 @@ export default function Advisor({ persona, lang, onBack }) {
           </button>
         </div>
       </div>
+
+      {connectionState === 'error' && (
+        <div role="status" style={{
+          flexShrink: 0, padding: '7px 14px', textAlign: 'center',
+          background: 'rgba(127,29,29,0.28)', borderBottom: '1px solid rgba(248,113,113,0.3)',
+          color: '#fecaca', fontSize: 12,
+        }}>
+          {isHe ? 'היועצת אינה זמינה כרגע. אפשר להמשיך לכתוב ולנסות שוב בעוד רגע.' : 'The advisor is temporarily unavailable. You can keep writing and retry shortly.'}
+        </div>
+      )}
 
       {showProfiles && (
         <div onClick={() => setShowProfiles(false)} style={{
@@ -628,15 +696,34 @@ export default function Advisor({ persona, lang, onBack }) {
               </div>
             ) : (
               <div style={{ display: 'grid', gap: 10 }}>
-                {profiles.map(profile => (
-                  <div key={profile.name} style={{
+                {profileEntries.map(([profileId, profile]) => (
+                  <div key={profileId} style={{
                     padding: 14, borderRadius: 12,
                     border: `1px solid ${ac}22`,
                     background: 'rgba(255,255,255,0.045)',
                   }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                       <div style={{ color: '#edf3ff', fontSize: 16, fontWeight: 800 }}>{profile.name}</div>
-                      <div style={{ color: ac, fontSize: 12, fontWeight: 700 }}>{profile.role || (isHe ? '\u05d9\u05dc\u05d3/\u05d4' : 'child')}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <select
+                          aria-label={isHe ? `תפקיד של ${profile.name}` : `${profile.name} role`}
+                          value={profile.role || 'unknown'}
+                          onChange={event => updateProfile(profileId, { role: event.target.value })}
+                          style={{
+                            border: `1px solid ${ac}35`, borderRadius: 7,
+                            background: '#0b1320', color: ac, padding: '5px 7px',
+                            fontFamily: 'inherit', fontSize: 12,
+                          }}
+                        >
+                          {Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                        </select>
+                        <button
+                          onClick={() => deleteProfile(profileId)}
+                          aria-label={isHe ? `מחיקת הפרופיל של ${profile.name}` : `Delete ${profile.name}'s profile`}
+                          title={isHe ? 'מחיקת פרופיל' : 'Delete profile'}
+                          style={{ width: 30, height: 30, borderRadius: 7, border: '1px solid #4a2630', background: 'rgba(127,29,29,0.16)', color: '#fca5a5', cursor: 'pointer' }}
+                        >x</button>
+                      </div>
                     </div>
                     <ProfileField label={isHe ? '\u05d0\u05ea\u05d2\u05e8\u05d9\u05dd' : 'Challenges'} items={profile.challenges} />
                     <ProfileField label={isHe ? '\u05d8\u05e8\u05d9\u05d2\u05e8\u05d9\u05dd' : 'Triggers'} items={profile.triggers} />
@@ -645,6 +732,25 @@ export default function Advisor({ persona, lang, onBack }) {
                 ))}
               </div>
             )}
+
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ color: '#78859e', fontSize: 11, lineHeight: 1.5, marginBottom: 9 }}>
+                {isHe
+                  ? 'הזיכרון נשמר רק בדפדפן במכשיר הזה. הוא אינו מסונכרן ומתאים כרגע למצב הדגמה בלבד.'
+                  : 'Memory is stored only in this browser on this device. It is not synchronized and is currently intended for demo use.'}
+              </div>
+              <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                <button onClick={exportMemory} style={{ padding: '7px 10px', borderRadius: 7, border: `1px solid ${ac}35`, background: `${ac}12`, color: ac, fontFamily: 'inherit', cursor: 'pointer' }}>
+                  {isHe ? 'ייצוא זיכרון' : 'Export memory'}
+                </button>
+                <button onClick={resetSession} style={{ padding: '7px 10px', borderRadius: 7, border: '1px solid #344057', background: 'rgba(255,255,255,0.035)', color: '#aab4c8', fontFamily: 'inherit', cursor: 'pointer' }}>
+                  {isHe ? 'איפוס השיחה הנוכחית' : 'Reset current conversation'}
+                </button>
+                <button onClick={clearMemory} style={{ padding: '7px 10px', borderRadius: 7, border: '1px solid #4a2630', background: 'rgba(127,29,29,0.12)', color: '#fca5a5', fontFamily: 'inherit', cursor: 'pointer' }}>
+                  {isHe ? 'מחיקת כל הזיכרון' : 'Clear all memory'}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -821,7 +927,10 @@ export default function Advisor({ persona, lang, onBack }) {
               }}
             />
             {(isSpeechInputSupported() || isRecordedSpeechSupported()) && (
-              <button onClick={toggleListening} disabled={busy} style={{
+              <button onClick={toggleListening} disabled={busy}
+                aria-label={listening ? (isHe ? 'עצירת הקלטה' : 'Stop recording') : (isHe ? 'התחלת הקלטה' : 'Start recording')}
+                aria-pressed={listening}
+                style={{
                 width: 42, height: 42, borderRadius: 12,
                 border: `1px solid ${listening ? '#ef4444' : ac + '35'}`,
                 background: listening ? '#ef444422' : 'rgba(255,255,255,0.05)',
@@ -845,7 +954,7 @@ export default function Advisor({ persona, lang, onBack }) {
             </button>
           </div>
           {!busy && (
-            <div style={{ display: 'flex', gap: 5, marginTop: 7, overflowX: 'auto', paddingBottom: 1 }}>
+            <div style={{ display: 'flex', gap: 5, marginTop: 7, flexWrap: 'wrap', justifyContent: isHe ? 'flex-start' : 'flex-start', paddingBottom: 1 }}>
               {QUICK.map((q, i) => (
                 <button key={i} onClick={() => { setInput(q); inputRef.current?.focus(); }} style={{
                   padding: '5px 12px', borderRadius: 99,

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import PersonaSelect from './PersonaSelect';
 import Advisor from './Advisor';
+import { unlockAudio } from './api';
 
 export default function App() {
   const [screen, setScreen] = useState('select');
@@ -22,7 +23,11 @@ export default function App() {
     return (
       <PersonaSelect
         lang={lang}
-        onSelect={p => { setPersona(p); setScreen('chat'); }}
+        onSelect={p => {
+          unlockAudio().catch(() => {});
+          setPersona(p);
+          setScreen('chat');
+        }}
       />
     );
   }

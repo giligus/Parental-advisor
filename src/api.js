@@ -51,11 +51,25 @@ export async function callLLM(system, messages) {
   }
 
   if (!r.ok) {
-    const detail = d?.error ? `: ${d.error}` : '';
-    throw new Error(`API ${r.status}${detail}`);
+    const error = new Error(d?.category === 'rate_limit'
+      ? 'Too many requests. Please wait a moment.'
+      : 'Advisor service is temporarily unavailable.');
+    error.status = r.status;
+    error.category = d?.category || 'error';
+    throw error;
   }
 
   return d.text || '';
+}
+
+export async function checkAdvisorHealth() {
+  try {
+    const response = await fetch('/api/health', { headers: { Accept: 'application/json' } });
+    const data = await response.json();
+    return { ok: response.ok, ...data };
+  } catch {
+    return { ok: false, status: 'unavailable' };
+  }
 }
 
 // ── ElevenLabs TTS ────────────────────────────────────

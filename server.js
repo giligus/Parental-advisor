@@ -9,6 +9,7 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '10mb' }));
 
 app.use('/api', (_req, res, next) => {
@@ -17,7 +18,8 @@ app.use('/api', (_req, res, next) => {
 });
 
 // ── Config from env ───────────────────────────────────
-const PROVIDER      = (process.env.LLM_PROVIDER || 'anthropic').toLowerCase();
+const requestedProvider = (process.env.LLM_PROVIDER || 'anthropic').toLowerCase();
+const PROVIDER = requestedProvider === 'openai' ? 'openai' : 'anthropic';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
 const OPENAI_KEY    = process.env.OPENAI_API_KEY    || '';
 const ELEVENLABS_KEY = process.env.ELEVENLABS_API_KEY || '';
@@ -37,6 +39,63 @@ const OPENAI_MODEL    = process.env.OPENAI_MODEL    || 'gpt-4.1-mini';
 
 console.log(`[server] Provider: ${PROVIDER}`);
 console.log(`[server] Model: ${PROVIDER === 'anthropic' ? ANTHROPIC_MODEL : OPENAI_MODEL}`);
+
+const providerHealth = {
+  anthropic: ANTHROPIC_KEY ? 'unknown' : 'unconfigured',
+  openai: OPENAI_KEY ? 'unknown' : 'unconfigured',
+};
+
+function createRateLimiter({ windowMs, max }) {
+  const clients = new Map();
+  const cleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [key, value] of clients) {
+      if (value.resetAt <= now) clients.delete(key);
+    }
+  }, windowMs);
+  cleanup.unref?.();
+
+  return (req, res, next) => {
+    const key = req.ip || req.socket?.remoteAddress || 'unknown';
+    const now = Date.now();
+    const current = clients.get(key);
+    const bucket = !current || current.resetAt <= now
+      ? { count: 0, resetAt: now + windowMs }
+      : current;
+
+    bucket.count += 1;
+    clients.set(key, bucket);
+    res.setHeader('RateLimit-Limit', String(max));
+    res.setHeader('RateLimit-Remaining', String(Math.max(0, max - bucket.count)));
+
+    if (bucket.count > max) {
+      res.setHeader('Retry-After', String(Math.ceil((bucket.resetAt - now) / 1000)));
+      return res.status(429).json({ error: 'Too many requests', category: 'rate_limit' });
+    }
+    next();
+  };
+}
+
+const chatRateLimit = createRateLimiter({ windowMs: 60_000, max: 24 });
+const speechRateLimit = createRateLimiter({ windowMs: 60_000, max: 36 });
+const transcriptionRateLimit = createRateLimiter({ windowMs: 60_000, max: 12 });
+
+function validateChatPayload(req, res, next) {
+  const { system, messages, max_tokens = 1024 } = req.body || {};
+  const validMessages = Array.isArray(messages)
+    && messages.length <= 24
+    && messages.every(message => (
+      (message?.role === 'user' || message?.role === 'assistant')
+      && typeof message?.content === 'string'
+      && message.content.length <= 8_000
+    ));
+
+  if (typeof system !== 'string' || !system || system.length > 24_000 || !validMessages) {
+    return res.status(400).json({ error: 'Invalid chat request' });
+  }
+  req.body.max_tokens = Math.max(32, Math.min(Number(max_tokens) || 1024, 2_048));
+  next();
+}
 
 function looksHebrew(text = '') {
   return /[\u0590-\u05FF]/.test(text);
@@ -381,28 +440,50 @@ async function callOpenAI(system, messages, maxTokens) {
   return data.choices?.[0]?.message?.content || '';
 }
 
-// ── /api/chat endpoint ────────────────────────────────
-app.post('/api/chat', async (req, res) => {
-  const { system, messages, max_tokens = 1024 } = req.body;
+function hasProviderKey(provider) {
+  return provider === 'openai' ? Boolean(OPENAI_KEY) : Boolean(ANTHROPIC_KEY);
+}
 
-  if (!system || !Array.isArray(messages)) {
-    return res.status(400).json({ error: 'Missing system or messages' });
+async function callProvider(provider, system, messages, maxTokens) {
+  return provider === 'openai'
+    ? callOpenAI(system, messages, maxTokens)
+    : callAnthropic(system, messages, maxTokens);
+}
+
+async function callWithProviderFallback(system, messages, maxTokens) {
+  const fallback = PROVIDER === 'anthropic' ? 'openai' : 'anthropic';
+  const providers = [PROVIDER, fallback].filter((provider, index, list) => (
+    list.indexOf(provider) === index && hasProviderKey(provider)
+  ));
+  const failures = [];
+
+  for (const provider of providers) {
+    try {
+      const text = await callProvider(provider, system, messages, maxTokens);
+      providerHealth[provider] = 'ready';
+      return { text, provider, usedFallback: provider !== PROVIDER };
+    } catch (error) {
+      providerHealth[provider] = 'error';
+      failures.push({ provider, error });
+      console.warn(`[/api/chat] ${provider} failed:`, error.message);
+    }
   }
 
+  const error = new Error(failures.map(item => `${item.provider}: ${item.error.message}`).join(' | ') || 'No LLM provider is configured');
+  error.failures = failures;
+  throw error;
+}
+
+// ── /api/chat endpoint ────────────────────────────────
+app.post('/api/chat', chatRateLimit, validateChatPayload, async (req, res) => {
+  const { system, messages, max_tokens = 1024 } = req.body;
+
   try {
-    let text;
-
-    if (PROVIDER === 'openai') {
-      text = await callOpenAI(system, messages, max_tokens);
-    } else {
-      // Default: Anthropic
-      text = await callAnthropic(system, messages, max_tokens);
-    }
-
-    res.json({ text, provider: PROVIDER });
+    const result = await callWithProviderFallback(system, messages, max_tokens);
+    res.json(result);
 
   } catch (err) {
-    console.error(`[/api/chat] ${PROVIDER} error:`, err.message);
+    console.error('[/api/chat] all providers failed:', err.message);
 
     // Categorize error for the client
     const msg = err.message || '';
@@ -412,15 +493,16 @@ app.post('/api/chat', async (req, res) => {
 
     const category = isQuota ? 'quota' : isAuth ? 'auth' : isTimeout ? 'timeout' : 'error';
 
-    res.status(500).json({
-      error: msg,
+    res.status(503).json({
+      error: 'Advisor service is temporarily unavailable',
       category,
       provider: PROVIDER,
+      retryable: category !== 'auth',
     });
   }
 });
 
-app.post('/api/chat-voice-stream', async (req, res) => {
+app.post('/api/chat-voice-stream', chatRateLimit, validateChatPayload, async (req, res) => {
   const { system, messages, voiceId, lang, max_tokens = 420 } = req.body || {};
 
   if (!system || !Array.isArray(messages)) {
@@ -435,6 +517,10 @@ app.post('/api/chat-voice-stream', async (req, res) => {
   let ttsBuffer = '';
   let ttsChunksSent = 0;
   let eventId = 0;
+  const fallbackProvider = PROVIDER === 'anthropic' ? 'openai' : 'anthropic';
+  const streamProvider = providerHealth[PROVIDER] === 'error' && hasProviderKey(fallbackProvider)
+    ? fallbackProvider
+    : PROVIDER;
 
   const writeEvent = event => {
     if (closed || res.destroyed) return;
@@ -489,28 +575,30 @@ app.post('/api/chat-voice-stream', async (req, res) => {
       flushTts(false);
     };
 
-    if (PROVIDER === 'openai') {
+    if (streamProvider === 'openai') {
       await streamOpenAI(system, messages, max_tokens, handleDelta);
     } else {
       await streamAnthropic(system, messages, max_tokens, handleDelta);
     }
 
+    providerHealth[streamProvider] = 'ready';
     flushTts(true);
     tts.close();
     await tts.done;
-    writeEvent({ type: 'done', text: fullText, provider: PROVIDER });
+    writeEvent({ type: 'done', text: fullText, provider: streamProvider, usedFallback: streamProvider !== PROVIDER });
     res.end();
   } catch (err) {
-    console.error(`[/api/chat-voice-stream] ${PROVIDER} error:`, err.message);
+    providerHealth[streamProvider] = 'error';
+    console.error(`[/api/chat-voice-stream] ${streamProvider} error:`, err.message);
     tts.abort();
     if (!closed) {
-      writeEvent({ type: 'error', error: err.message || 'Voice stream failed', provider: PROVIDER });
+      writeEvent({ type: 'error', error: 'Voice response is temporarily unavailable', provider: streamProvider });
       res.end();
     }
   }
 });
 
-app.post('/api/tts', async (req, res) => {
+app.post('/api/tts', speechRateLimit, async (req, res) => {
   const { text, voiceId } = req.body || {};
   if (!ELEVENLABS_KEY) {
     return res.status(503).json({ error: 'ELEVENLABS_API_KEY is not configured' });
@@ -567,7 +655,7 @@ app.post('/api/tts', async (req, res) => {
   }
 });
 
-app.post('/api/tts-stream-input', async (req, res) => {
+app.post('/api/tts-stream-input', speechRateLimit, async (req, res) => {
   const { text, voiceId } = req.body || {};
   if (!ELEVENLABS_KEY) {
     return res.status(503).json({ error: 'ELEVENLABS_API_KEY is not configured' });
@@ -673,7 +761,7 @@ app.post('/api/tts-stream-input', async (req, res) => {
   });
 });
 
-app.post('/api/stt', async (req, res) => {
+app.post('/api/stt', transcriptionRateLimit, async (req, res) => {
   const { audioBase64, mimeType = 'audio/webm', lang } = req.body || {};
   if (!ELEVENLABS_KEY && !OPENAI_KEY) {
     return res.status(503).json({ error: 'No speech-to-text provider is configured' });
@@ -729,6 +817,23 @@ app.get('/api/config', (req, res) => {
     sttModel: ELEVENLABS_STT_MODEL,
     ttsOutputFormat: ELEVENLABS_OUTPUT_FORMAT,
     ttsStreamOutputFormat: ELEVENLABS_STREAM_OUTPUT_FORMAT,
+    providerHealth,
+    fallbackAvailable: PROVIDER === 'anthropic' ? Boolean(OPENAI_KEY) : Boolean(ANTHROPIC_KEY),
+  });
+});
+
+app.get('/api/health', (_req, res) => {
+  const configuredProviders = ['anthropic', 'openai'].filter(hasProviderKey);
+  const readyProvider = configuredProviders.find(provider => providerHealth[provider] === 'ready');
+  const allFailed = configuredProviders.length > 0
+    && configuredProviders.every(provider => providerHealth[provider] === 'error');
+
+  res.status(configuredProviders.length && !allFailed ? 200 : 503).json({
+    status: readyProvider ? 'ready' : configuredProviders.length && !allFailed ? 'unknown' : 'unavailable',
+    provider: readyProvider || PROVIDER,
+    providerHealth,
+    voice: ELEVENLABS_KEY ? 'configured' : 'fallback',
+    speechInput: ELEVENLABS_KEY || OPENAI_KEY ? 'configured' : 'unavailable',
   });
 });
 
