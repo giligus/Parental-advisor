@@ -117,7 +117,7 @@ function hasSufficientEventContext(text, event, people) {
   return clearOutcome || (words.length >= 7 && actorMention && (intervention || sequence));
 }
 
-function routeMessage(text, event, contextSufficient, safety) {
+function routeMessage(text, event, contextSufficient, safety, people = []) {
   const trimmed = text.trim();
   if (safety.requiresOverride) return 'safety';
   if (/^(שלום|היי|הי|אהלן|hi|hello)$/i.test(trimmed)) return 'greeting';
@@ -126,7 +126,7 @@ function routeMessage(text, event, contextSufficient, safety) {
   if (/(מה לעשות|איך להגיב|תוכנית|צעדים|what should|plan|how should)/i.test(trimmed)) return 'action_plan';
   if (/(נמאס|לא מסוגל|שחוקים|מיואש|קשה לי|exhausted|hopeless|overwhelmed)/i.test(trimmed)) return 'empathic';
   if (event) return contextSufficient ? 'event' : 'event_intake';
-  if (extractPeople(trimmed).length > 0 || /(לדבר על|רוצה לדבר|tell you about|talk about)/i.test(trimmed)) return 'topic_intake';
+  if (people.length > 0 || /(לדבר על|רוצה לדבר|tell you about|talk about)/i.test(trimmed)) return 'topic_intake';
   return 'open';
 }
 
@@ -350,7 +350,7 @@ export function prepareAdvisorTurn({ message, caseData, lang, persona }) {
     safetyFlags: [safety.class],
   } : null);
   const contextSufficient = hasSufficientEventContext(message, eventDraft, people);
-  const route = routeMessage(message, eventDraft, contextSufficient, safety);
+  const route = routeMessage(message, eventDraft, contextSufficient, safety, people);
   let next = {
     ...EMPTY_CASE,
     ...caseData,

@@ -4,6 +4,7 @@
 
 import express from 'express';
 import path from 'path';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -12,7 +13,9 @@ const isDev = process.argv.includes('--dev') || process.env.NODE_ENV === 'develo
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '10mb' }));
 
-app.use('/api', (_req, res, next) => {
+app.use('/api', (req, res, next) => {
+  req.traceId = req.get('x-request-id') || randomUUID();
+  res.setHeader('X-Trace-Id', req.traceId);
   res.setHeader('Cache-Control', 'no-store');
   next();
 });
@@ -480,10 +483,10 @@ app.post('/api/chat', chatRateLimit, validateChatPayload, async (req, res) => {
 
   try {
     const result = await callWithProviderFallback(system, messages, max_tokens);
-    res.json(result);
+    res.json({ ...result, traceId: req.traceId });
 
   } catch (err) {
-    console.error('[/api/chat] all providers failed:', err.message);
+    console.error(`[/api/chat] trace=${req.traceId} all providers failed:`, err.message);
 
     // Categorize error for the client
     const msg = err.message || '';
@@ -498,6 +501,7 @@ app.post('/api/chat', chatRateLimit, validateChatPayload, async (req, res) => {
       category,
       provider: PROVIDER,
       retryable: category !== 'auth',
+      traceId: req.traceId,
     });
   }
 });
@@ -524,7 +528,7 @@ app.post('/api/chat-voice-stream', chatRateLimit, validateChatPayload, async (re
 
   const writeEvent = event => {
     if (closed || res.destroyed) return;
-    res.write(`${JSON.stringify({ id: eventId += 1, ...event })}\n`);
+    res.write(`${JSON.stringify({ id: eventId += 1, traceId: req.traceId, ...event })}\n`);
   };
 
   res.writeHead(200, {
@@ -589,7 +593,7 @@ app.post('/api/chat-voice-stream', chatRateLimit, validateChatPayload, async (re
     res.end();
   } catch (err) {
     providerHealth[streamProvider] = 'error';
-    console.error(`[/api/chat-voice-stream] ${streamProvider} error:`, err.message);
+    console.error(`[/api/chat-voice-stream] trace=${req.traceId} ${streamProvider} error:`, err.message);
     tts.abort();
     if (!closed) {
       writeEvent({ type: 'error', error: 'Voice response is temporarily unavailable', provider: streamProvider });
@@ -783,7 +787,7 @@ app.post('/api/stt', transcriptionRateLimit, async (req, res) => {
         return res.json(result);
       } catch (error) {
         errors.push(`ElevenLabs: ${error.message}`);
-        console.warn('[/api/stt] ElevenLabs failed, trying fallback:', error.message);
+        console.warn(`[/api/stt] trace=${req.traceId} ElevenLabs failed, trying fallback:`, error.message);
       }
     }
 
@@ -796,10 +800,19 @@ app.post('/api/stt', transcriptionRateLimit, async (req, res) => {
       }
     }
 
-    return res.status(502).json({ error: errors.join(' | ') || 'Speech-to-text failed' });
+    console.error(`[/api/stt] trace=${req.traceId} all providers failed:`, errors.join(' | '));
+    return res.status(502).json({
+      error: 'Speech could not be transcribed right now',
+      category: 'transcription_unavailable',
+      traceId: req.traceId,
+    });
   } catch (err) {
-    console.error('[/api/stt] error:', err.message);
-    return res.status(500).json({ error: err.message || 'Speech-to-text proxy failed' });
+    console.error(`[/api/stt] trace=${req.traceId} error:`, err.message);
+    return res.status(500).json({
+      error: 'Speech could not be transcribed right now',
+      category: 'transcription_unavailable',
+      traceId: req.traceId,
+    });
   }
 });
 
@@ -822,7 +835,7 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-app.get('/api/health', (_req, res) => {
+app.get('/api/health', (req, res) => {
   const configuredProviders = ['anthropic', 'openai'].filter(hasProviderKey);
   const readyProvider = configuredProviders.find(provider => providerHealth[provider] === 'ready');
   const allFailed = configuredProviders.length > 0
@@ -834,6 +847,7 @@ app.get('/api/health', (_req, res) => {
     providerHealth,
     voice: ELEVENLABS_KEY ? 'configured' : 'fallback',
     speechInput: ELEVENLABS_KEY || OPENAI_KEY ? 'configured' : 'unavailable',
+    traceId: req.traceId,
   });
 });
 

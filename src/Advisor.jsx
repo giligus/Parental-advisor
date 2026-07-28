@@ -222,7 +222,7 @@ export default function Advisor({ persona, lang, onBack }) {
           if (!played) {
             console.warn('ElevenLabs unavailable, using browser speech fallback:', data?.error || 'unknown TTS error');
             setStatus(isHe ? 'קול דפדפן' : 'Browser voice');
-            setVoiceIssue(isHe ? `קול ElevenLabs לא זמין: ${data?.error || 'שגיאה לא ידועה'}` : `ElevenLabs voice unavailable: ${data?.error || 'unknown error'}`);
+            setVoiceIssue(isHe ? 'הקול הטבעי אינו זמין כרגע. עברנו לקול המכשיר.' : 'Natural voice is temporarily unavailable. Using the device voice instead.');
             await playBrowserSpeech(speechChunks.slice(index).join(' '), true);
             return;
           }
@@ -299,7 +299,7 @@ export default function Advisor({ persona, lang, onBack }) {
 
         if (!streamed.ok) {
           if (streamed.error) {
-            setVoiceIssue(isHe ? `זרימת קול נכשלה: ${streamed.error}` : `Voice stream failed: ${streamed.error}`);
+            setVoiceIssue(isHe ? 'הקול הטבעי אינו זמין כרגע. התשובה תמשיך כטקסט.' : 'Natural voice is temporarily unavailable. The response will continue as text.');
           }
           const reply = streamed.text || await callLLM(turn.system, history);
           setMsgs(p => p.map(msg => msg.streamId === streamId ? { ...msg, text: reply } : msg));
@@ -513,8 +513,7 @@ export default function Advisor({ persona, lang, onBack }) {
           send(text);
         } else {
           console.warn('Speech-to-text failed:', data?.error || 'empty transcript');
-          const issue = data?.error || 'empty transcript';
-          setVoiceIssue(isHe ? `תמלול נכשל: ${issue}` : `Transcription failed: ${issue}`);
+          setVoiceIssue(isHe ? 'לא הצלחתי להבין את ההקלטה. אפשר לנסות שוב או לכתוב.' : 'I could not understand the recording. Try again or type instead.');
           setStatus(isHe ? 'לא הצלחתי לתמלל' : 'Could not transcribe');
           inputRef.current?.focus();
         }
@@ -526,7 +525,7 @@ export default function Advisor({ persona, lang, onBack }) {
       }, 30000);
     } catch (error) {
       console.warn('Could not access microphone:', error);
-      setVoiceIssue(isHe ? `אין גישה למיקרופון: ${error?.message || error}` : `No microphone access: ${error?.message || error}`);
+      setVoiceIssue(isHe ? 'אין גישה למיקרופון. בדקו את הרשאת המיקרופון בדפדפן.' : 'Microphone access is unavailable. Check the browser microphone permission.');
       setStatus(isHe ? 'בדקו הרשאת מיקרופון' : 'Check mic permission');
       inputRef.current?.focus();
     }
