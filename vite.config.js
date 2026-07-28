@@ -9,6 +9,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       cleanupOutdatedCaches: true,
       workbox: {
+        navigateFallback: null,
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
