@@ -52,7 +52,8 @@ function extractPeople(text) {
     { role: 'unknown', confidence: 0.82, re: /(?:ביקשנו מ|אמרנו ל|נתנו ל|שאלנו את|asked |told )([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})/giu },
     { role: 'child', confidence: 0.74, re: /(?:אמר|אמרה|דיווח|דיווחה)\s+ש([\u0590-\u05FF][\u0590-\u05FF'-]{1,22})\s+(?:מציק|מציקה|צורח|צועק|בוכה|מרביץ|דוחף)/giu },
     { role: 'unknown', confidence: 0.72, re: /(?:לדבר על|רוצה לדבר על|tell you about|talk about|עם|with)\s+([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})/giu },
-    { role: 'child', confidence: 0.78, re: /(?:^|[.!?]\s*)([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})\s+(?:מציק|מציקה|צורח|צועק|בוכה|מרביץ|דוחף|refuses|screams|bothers|hits|pushes)/giu },
+    { role: 'unknown', confidence: 0.82, re: /(?:היום|אתמול|שוב|אז|today|yesterday|again)\s+([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})\s+(?:הציק|הציקה|מציק|מציקה|צרח|צרחה|צעק|צעקה|בכה|בכתה|הרביץ|הרביצה|דחף|דחפה|התנגד|התנגדה|סירב|סירבה|מחזיק|מחזיקה|refused|screamed|yelled|cried|hit|pushed|held|is holding)/giu },
+    { role: 'unknown', confidence: 0.78, re: /(?:^|[.!?]\s*)([\u0590-\u05FFA-Za-z][\u0590-\u05FFA-Za-z'-]{1,22})\s+(?:מציק|מציקה|צורח|צורחת|צועק|צועקת|בוכה|מרביץ|מרביצה|דוחף|דוחפת|מסרב|מסרבת|מחזיק|מחזיקה|refuses|screams|bothers|hits|pushes|holds|is holding)/giu },
   ];
 
   for (const { role, confidence, re } of patterns) {

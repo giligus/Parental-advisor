@@ -1,5 +1,5 @@
 // server.js — LLM proxy server
-// Supports: Anthropic (claude-sonnet-4-20250514) and OpenAI (gpt-4.1 / gpt-4.1-mini)
+// Supports: Anthropic (claude-sonnet-4-6) and OpenAI (gpt-4.1 / gpt-4.1-mini)
 // Switch provider with: LLM_PROVIDER=anthropic|openai in .env
 
 import express from 'express';
@@ -36,7 +36,7 @@ const ELEVENLABS_STREAM_OUTPUT_FORMAT = process.env.ELEVENLABS_STREAM_OUTPUT_FOR
 const OPENAI_STT_MODEL = process.env.OPENAI_STT_MODEL || 'gpt-4o-mini-transcribe';
 
 // Model selection — can override via env
-const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514';
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
 // gpt-4.1 = best quality, gpt-4.1-mini = faster + cheaper
 const OPENAI_MODEL    = process.env.OPENAI_MODEL    || 'gpt-4.1-mini';
 
